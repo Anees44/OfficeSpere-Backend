@@ -21,6 +21,9 @@ const attendanceSchema = new mongoose.Schema(
       type: String,
       enum: ['Office', 'Remote', 'Field'],
       default: 'Office',
+      latitude: Number,
+      longitude: Number,
+      accuracy: Number,
     },
     checkInIpAddress: String,
     checkInDeviceInfo: String,
@@ -35,6 +38,9 @@ const attendanceSchema = new mongoose.Schema(
     checkOutLocation: {
       type: String,
       enum: ['Office', 'Remote', 'Field'],
+      latitude: Number,
+      longitude: Number,
+      accuracy: Number,
     },
     checkOutIpAddress: String,
     checkOutDeviceInfo: String,
@@ -149,12 +155,12 @@ attendanceSchema.index({ date: 1 });
 attendanceSchema.index({ status: 1 });
 
 // Calculate working hours on save
-attendanceSchema.pre('save', function(next) {
+attendanceSchema.pre('save', function (next) {
   if (this.checkInTime && this.checkOutTime) {
     const diffMs = this.checkOutTime - this.checkInTime;
     const hours = diffMs / (1000 * 60 * 60);
     this.workHours = Math.round(hours * 100) / 100;
-    
+
     // Calculate productive hours (working hours - breaks)
     this.productiveHours = this.workHours - (this.totalBreakTime / 60);
   }
