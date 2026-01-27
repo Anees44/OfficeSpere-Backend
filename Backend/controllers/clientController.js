@@ -8,30 +8,53 @@ const DailyReport = require('../models/DailyReport');
 // @desc    Get client dashboard data
 // @route   GET /api/client/dashboard
 // @access  Private (Client only)
+// @desc    Get client dashboard data
+// @route   GET /api/client/dashboard
+// @access  Private (Client only)
 exports.getDashboard = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    const userId = req.user.id; // This is the USER ID from JWT
 
-    // Get client's projects
-    const projects = await Project.find({ client: clientId })
+    console.log('📊 Fetching dashboard for user ID:', userId);
+
+    // 1. First, find the client using userId
+    const client = await Client.findOne({ userId: userId });
+
+    if (!client) {
+      console.log('❌ Client not found for userId:', userId);
+      return res.status(404).json({
+        success: false,
+        message: 'Client profile not found'
+      });
+    }
+
+    console.log('✅ Client found:', client.clientId);
+
+    // 2. Now get projects using client._id (ObjectId)
+    const projects = await Project.find({ client: client._id })
       .select('name status startDate endDate budget progress')
       .lean();
 
-    // Count projects by status
-    const activeProjects = projects.filter(p => p.status === 'in_progress').length;
-    const completedProjects = projects.filter(p => p.status === 'completed').length;
-    const pendingProjects = projects.filter(p => p.status === 'planning').length;
+    console.log('📋 Projects found:', projects.length);
 
-    // Get upcoming meetings
+    // Count projects by status
+    const activeProjects = projects.filter(p => p.status === 'in-progress' || p.status === 'in_progress').length;
+    const completedProjects = projects.filter(p => p.status === 'completed').length;
+    const pendingProjects = projects.filter(p => p.status === 'planning' || p.status === 'pending').length;
+
+    // Get upcoming meetings - use client._id
     const upcomingMeetings = await Meeting.find({
-      participants: clientId,
-      meetingDate: { $gte: new Date() },
+      participants: client._id,
+      scheduledAt: { $gte: new Date() }, // Changed from meetingDate to scheduledAt
       status: { $ne: 'cancelled' }
     })
-      .sort({ meetingDate: 1 })
+      .sort({ scheduledAt: 1 }) // Changed from meetingDate
       .limit(5)
       .populate('organizer', 'name email')
+      .populate('project', 'name')
       .lean();
+
+    console.log('📅 Upcoming meetings:', upcomingMeetings.length);
 
     // Calculate total investment and average progress
     const totalInvestment = projects.reduce((sum, p) => sum + (p.budget || 0), 0);
@@ -39,34 +62,63 @@ exports.getDashboard = async (req, res) => {
       ? projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length 
       : 0;
 
-    // Get recent feedback submitted
+    // Get recent feedback - use client._id
     const recentFeedback = await Project.find({
-      client: clientId,
+      client: client._id,
       'feedback.0': { $exists: true }
     })
       .select('name feedback')
-      .sort({ 'feedback.submittedAt': -1 })
+      .sort({ 'feedback.createdAt': -1 }) // Changed from submittedAt to createdAt
       .limit(3)
       .lean();
 
+    // Prepare dashboard data
+    const dashboardData = {
+      stats: {
+        totalProjects: projects.length,
+        activeProjects,
+        completedProjects,
+        pendingProjects,
+        totalInvestment: totalInvestment.toFixed(2),
+        averageProgress: Math.round(averageProgress),
+        pendingApprovals: 0, // You can calculate this if you have approval system
+        upcomingMeetings: upcomingMeetings.length
+      },
+      recentProjects: projects.slice(0, 5).map(p => ({
+        name: p.name,
+        status: p.status,
+        progress: p.progress || 0,
+        endDate: p.endDate
+      })),
+      upcomingDeadlines: projects
+        .filter(p => p.endDate && new Date(p.endDate) > new Date())
+        .sort((a, b) => new Date(a.endDate) - new Date(b.endDate))
+        .slice(0, 5)
+        .map(p => ({
+          projectName: p.name,
+          milestone: 'Project Completion',
+          deadline: p.endDate
+        })),
+      recentUpdates: projects
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
+        .slice(0, 5)
+        .map(p => ({
+          projectName: p.name,
+          description: `Project status updated to ${p.status}`,
+          status: p.status,
+          date: p.updatedAt || p.createdAt
+        }))
+    };
+
+    console.log('✅ Dashboard data prepared');
+
     res.status(200).json({
       success: true,
-      data: {
-        stats: {
-          totalProjects: projects.length,
-          activeProjects,
-          completedProjects,
-          pendingProjects,
-          totalInvestment,
-          averageProgress: Math.round(averageProgress)
-        },
-        recentProjects: projects.slice(0, 5),
-        upcomingMeetings,
-        recentFeedback
-      }
+      data: dashboardData
     });
+
   } catch (error) {
-    console.error('Get client dashboard error:', error);
+    console.error('❌ Get client dashboard error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch dashboard data',
@@ -883,22 +935,85 @@ exports.rateSatisfaction = async (req, res) => {
 // @access  Private (Client only)
 exports.getProfile = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    const userId = req.user.id;
 
-    const client = await Client.findById(clientId)
-      .select('-password')
+    // Find client by userId reference
+    let client = await Client.findOne({ userId: userId })
+      .populate('userId', 'name email phone avatar')
       .lean();
 
+    // If client doesn't exist, create one
     if (!client) {
-      return res.status(404).json({
-        success: false,
-        message: 'Client profile not found'
+      const User = require('../models/User');
+      const user = await User.findById(userId);
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      // Generate unique client ID
+      const count = await Client.countDocuments();
+      const clientId = `CL${String(count + 1).padStart(4, '0')}`;
+
+      // Create client record
+      const newClient = await Client.create({
+        userId: userId,
+        clientId: clientId,
+        companyName: 'Not Set',
+        contactPerson: {
+          name: user.name,
+          email: user.email,
+          phone: user.phone || ''
+        },
+        address: {
+          street: '',
+          city: '',
+          state: '',
+          country: '',
+          zipCode: ''
+        },
+        taxInfo: {
+          taxId: ''
+        },
+        isActive: true
       });
+
+      client = await Client.findById(newClient._id)
+        .populate('userId', 'name email phone avatar')
+        .lean();
     }
+
+    // Flatten the data structure for frontend
+    const profileData = {
+      _id: client._id,
+      clientId: client.clientId,
+      name: client.userId?.name || client.contactPerson?.name || '',
+      email: client.userId?.email || client.contactPerson?.email || '',
+      phone: client.userId?.phone || client.contactPerson?.phone || '',
+      avatar: client.userId?.avatar || '',
+      companyName: client.companyName || '',
+      industry: client.industry || '',
+      companySize: client.companySize || '',
+      companyWebsite: client.companyWebsite || '',
+      website: client.companyWebsite || '', // Alias for frontend
+      address: client.address || {
+        street: '',
+        city: '',
+        state: '',
+        country: '',
+        zipCode: ''
+      },
+      taxInfo: client.taxInfo || {
+        taxId: ''
+      }
+    };
 
     res.status(200).json({
       success: true,
-      data: client
+      data: profileData
     });
   } catch (error) {
     console.error('Get client profile error:', error);
@@ -915,34 +1030,115 @@ exports.getProfile = async (req, res) => {
 // @access  Private (Client only)
 exports.updateProfile = async (req, res) => {
   try {
-    const clientId = req.user.id;
-    const { contactPerson, email, phone, address, avatar } = req.body;
+    const userId = req.user.id;
+    const { 
+      name, 
+      email, 
+      phone, 
+      avatar, 
+      companyName, 
+      industry, 
+      website, 
+      companySize, 
+      address, 
+      city, 
+      state, 
+      zipCode, 
+      country, 
+      taxId 
+    } = req.body;
 
-    const client = await Client.findById(clientId);
+    // Find client by userId
+    let client = await Client.findOne({ userId: userId });
 
     if (!client) {
       return res.status(404).json({
         success: false,
-        message: 'Client not found'
+        message: 'Client profile not found'
       });
     }
 
-    // Update fields
-    if (contactPerson) client.contactPerson = contactPerson;
-    if (email) client.email = email;
-    if (phone) client.phone = phone;
-    if (address) client.address = address;
-    if (avatar) client.avatar = avatar;
+    // Update User model fields
+    const User = require('../models/User');
+    const user = await User.findById(userId);
+    
+    if (user) {
+      if (name) user.name = name;
+      if (email) user.email = email;
+      if (phone) user.phone = phone;
+      if (avatar) user.avatar = avatar;
+      await user.save();
+    }
+
+    // Update Client model fields
+    if (companyName !== undefined) client.companyName = companyName;
+    if (industry !== undefined) client.industry = industry;
+    if (website !== undefined) client.companyWebsite = website;
+    if (companySize !== undefined) client.companySize = companySize;
+    
+    // Update address - initialize if doesn't exist
+    if (!client.address) {
+      client.address = {};
+    }
+    
+    if (address !== undefined) client.address.street = address;
+    if (city !== undefined) client.address.city = city;
+    if (state !== undefined) client.address.state = state;
+    if (zipCode !== undefined) client.address.zipCode = zipCode;
+    if (country !== undefined) client.address.country = country;
+
+    // Update tax info - initialize if doesn't exist
+    if (!client.taxInfo) {
+      client.taxInfo = {};
+    }
+    
+    if (taxId !== undefined) client.taxInfo.taxId = taxId;
+
+    // Update contact person - initialize if doesn't exist
+    if (!client.contactPerson) {
+      client.contactPerson = {};
+    }
+    
+    if (name !== undefined) client.contactPerson.name = name;
+    if (email !== undefined) client.contactPerson.email = email;
+    if (phone !== undefined) client.contactPerson.phone = phone;
 
     await client.save();
 
-    // Remove password from response
-    client.password = undefined;
+    // Populate and return updated data
+    client = await Client.findById(client._id)
+      .populate('userId', 'name email phone avatar')
+      .lean();
+
+    // Flatten the data structure
+    const profileData = {
+      _id: client._id,
+      clientId: client.clientId,
+      name: client.userId?.name || client.contactPerson?.name || '',
+      email: client.userId?.email || client.contactPerson?.email || '',
+      phone: client.userId?.phone || client.contactPerson?.phone || '',
+      avatar: client.userId?.avatar || '',
+      companyName: client.companyName || '',
+      industry: client.industry || '',
+      companySize: client.companySize || '',
+      companyWebsite: client.companyWebsite || '',
+      website: client.companyWebsite || '',
+      address: client.address || {
+        street: '',
+        city: '',
+        state: '',
+        country: '',
+        zipCode: ''
+      },
+      taxInfo: client.taxInfo || {
+        taxId: ''
+      }
+    };
 
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
-      data: client
+      data: profileData
     });
   } catch (error) {
     console.error('Update client profile error:', error);
@@ -997,5 +1193,60 @@ exports.updateCompanyInfo = async (req, res) => {
     });
   }
 };
+
+// @desc    Change password
+// @route   PUT /api/client/password
+// @access  Private (Client only)
+exports.changePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide both current and new password'
+      });
+    }
+
+    // Get user with password
+    const User = require('../models/User');
+    const user = await User.findById(userId).select('+password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check current password
+    const isMatch = await user.comparePassword(currentPassword);
+
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to change password',
+      error: error.message
+    });
+  }
+};
+
 
 module.exports = exports;

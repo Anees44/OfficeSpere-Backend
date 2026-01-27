@@ -45,5 +45,6 @@ router.post('/projects/:id/rating', clientController.rateSatisfaction);
 router.get('/profile', clientController.getProfile);
 router.put('/profile', clientController.updateProfile);
 router.put('/profile/company', clientController.updateCompanyInfo);
+router.put('/password', clientController.changePassword);
 
 module.exports = router;

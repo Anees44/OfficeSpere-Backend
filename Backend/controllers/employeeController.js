@@ -957,64 +957,129 @@ exports.getProject = async (req, res) => {
 // @desc    Submit daily report
 // @route   POST /api/employee/reports/daily
 // @access  Private (Employee)
+
 exports.submitDailyReport = async (req, res) => {
   try {
-    const employeeId = req.user.id;
+    const userId = req.user.id; // User ID from JWT
     const {
       date,
-      tasksCompleted,
-      tasksInProgress,
-      blockers,
       achievements,
-      nextDayPlan,
-      workHours
+      challenges,
+      blockers,
+      suggestions,
+      totalHoursWorked,
+      plannedForTomorrow
     } = req.body;
 
-    const employee = await Employee.findOne({ userId: employeeId });
+    console.log('📝 Submitting daily report for user:', userId);
+    console.log('📊 Report data:', req.body);
+
+    // Validate required fields
+    if (!date || totalHoursWorked === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Date and total hours worked are required'
+      });
+    }
+
+    // Find employee using userId
+    const employee = await Employee.findOne({ userId: userId });
 
     if (!employee) {
       return res.status(404).json({
         success: false,
-        message: 'Employee not found'
+        message: 'Employee profile not found'
       });
     }
 
+    console.log('✅ Employee found:', employee.employeeId);
+
     // Check if report already exists for this date
-    const reportDate = date ? new Date(date) : new Date();
-    reportDate.setHours(0, 0, 0, 0);
+    const reportDate = new Date(date);
+    reportDate.setHours(0, 0, 0, 0); // Start of day
+
+    console.log('📅 Checking for existing report on:', reportDate);
 
     const existingReport = await DailyReport.findOne({
-      employeeId: employee._id,
-      date: reportDate
+      employee: employee._id,
+      date: {
+        $gte: reportDate,
+        $lt: new Date(reportDate.getTime() + 24 * 60 * 60 * 1000) // Next day
+      }
     });
 
     if (existingReport) {
       return res.status(400).json({
         success: false,
-        message: 'Daily report for this date already exists'
+        message: 'Daily report already submitted for this date'
       });
     }
 
+    // Generate report ID
+    const reportCount = await DailyReport.countDocuments();
+    const reportId = `DR${(reportCount + 1).toString().padStart(4, '0')}`;
+
+    console.log('📄 Creating report with ID:', reportId);
+
+    // Create the daily report
     const dailyReport = await DailyReport.create({
-      employeeId: employee._id,
+      reportId: reportId,
+      employee: employee._id, // Use employee._id (ObjectId)
       date: reportDate,
-      tasksCompleted: tasksCompleted || [],
-      tasksInProgress: tasksInProgress || [],
-      blockers: blockers || [],
       achievements: achievements || '',
-      nextDayPlan: nextDayPlan || '',
-      workHours: workHours || 0,
-      status: 'pending'
+      challenges: challenges || '',
+      blockers: blockers || '',
+      suggestions: suggestions || '',
+      totalHoursWorked: parseFloat(totalHoursWorked),
+      status: 'Submitted',
+      submittedAt: new Date(),
+      
+      // These can be empty arrays for now
+      tasksCompleted: [],
+      tasksInProgress: [],
+      plannedForTomorrow: plannedForTomorrow || []
     });
+
+    console.log('✅ Report created:', dailyReport._id);
+
+    // Get populated report
+    const populatedReport = await DailyReport.findById(dailyReport._id)
+      .populate('employee', 'employeeId designation department')
+      .populate({
+        path: 'employee',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      });
 
     res.status(201).json({
       success: true,
       message: 'Daily report submitted successfully',
-      data: dailyReport
+      data: populatedReport
     });
 
   } catch (error) {
-    console.error('Submit daily report error:', error);
+    console.error('❌ Submit daily report error:', error);
+    
+    // Handle mongoose validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+
+    // Handle duplicate key error (unique index)
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Daily report already exists for this date'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Server error',
