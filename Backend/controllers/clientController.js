@@ -61,6 +61,9 @@ exports.createProject = async (req, res) => {
     const projectCount = await Project.countDocuments();
     const projectId = `PRJ${String(projectCount + 1).padStart(4, '0')}`;
 
+    const normalizedPriority =
+      priority === 'Critical' ? 'Urgent' : priority || 'Medium';
+
     // For now, we'll create project without projectManager
     // Admin can assign project manager later
     const projectData = {
@@ -74,7 +77,7 @@ exports.createProject = async (req, res) => {
       priority: priority || 'Medium',
       startDate: startDate,
       endDate: deadline,
-      budget: budget || 0,
+      budget: Number(budget) || 0,
       spent: 0,
       progress: 0,
       tags: category ? [category] : [],
@@ -322,7 +325,7 @@ exports.sendProjectToAdmin = async (req, res) => {
 
     // Add to project (you may need to add this field to schema)
     // For now, we'll just log it and send success response
-    
+
     console.log('Admin Request:', adminRequest);
     console.log('✅ Request prepared for admin');
 
@@ -399,8 +402,8 @@ exports.getDashboard = async (req, res) => {
 
     // Calculate total investment and average progress
     const totalInvestment = projects.reduce((sum, p) => sum + (p.budget || 0), 0);
-    const averageProgress = projects.length > 0 
-      ? projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length 
+    const averageProgress = projects.length > 0
+      ? projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length
       : 0;
 
     // Get recent feedback - use client._id
@@ -473,12 +476,21 @@ exports.getDashboard = async (req, res) => {
 // @access  Private (Client only)
 exports.getMyProjects = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    const userId = req.user.id;
+    const client = await Client.findOne({ userId });
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client profile not found'
+      });
+    }
+
     const { status, search, sortBy = 'createdAt', order = 'desc' } = req.query;
 
     // Build query
     const query = { client: clientId };
-    
+
     if (status) {
       query.status = status;
     }
@@ -769,9 +781,9 @@ exports.getMeeting = async (req, res) => {
     const { id } = req.params;
     const clientId = req.user.id;
 
-    const meeting = await Meeting.findOne({ 
-      _id: id, 
-      participants: clientId 
+    const meeting = await Meeting.findOne({
+      _id: id,
+      participants: clientId
     })
       .populate('organizer', 'name email')
       .populate('participants', 'name email role avatar')
@@ -1372,21 +1384,21 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { 
-      name, 
-      email, 
-      phone, 
-      avatar, 
-      companyName, 
-      industry, 
-      website, 
-      companySize, 
-      address, 
-      city, 
-      state, 
-      zipCode, 
-      country, 
-      taxId 
+    const {
+      name,
+      email,
+      phone,
+      avatar,
+      companyName,
+      industry,
+      website,
+      companySize,
+      address,
+      city,
+      state,
+      zipCode,
+      country,
+      taxId
     } = req.body;
 
     // Find client by userId
@@ -1402,7 +1414,7 @@ exports.updateProfile = async (req, res) => {
     // Update User model fields
     const User = require('../models/User');
     const user = await User.findById(userId);
-    
+
     if (user) {
       if (name) user.name = name;
       if (email) user.email = email;
@@ -1416,12 +1428,12 @@ exports.updateProfile = async (req, res) => {
     if (industry !== undefined) client.industry = industry;
     if (website !== undefined) client.companyWebsite = website;
     if (companySize !== undefined) client.companySize = companySize;
-    
+
     // Update address - initialize if doesn't exist
     if (!client.address) {
       client.address = {};
     }
-    
+
     if (address !== undefined) client.address.street = address;
     if (city !== undefined) client.address.city = city;
     if (state !== undefined) client.address.state = state;
@@ -1432,14 +1444,14 @@ exports.updateProfile = async (req, res) => {
     if (!client.taxInfo) {
       client.taxInfo = {};
     }
-    
+
     if (taxId !== undefined) client.taxInfo.taxId = taxId;
 
     // Update contact person - initialize if doesn't exist
     if (!client.contactPerson) {
       client.contactPerson = {};
     }
-    
+
     if (name !== undefined) client.contactPerson.name = name;
     if (email !== undefined) client.contactPerson.email = email;
     if (phone !== undefined) client.contactPerson.phone = phone;
