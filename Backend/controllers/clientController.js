@@ -69,7 +69,7 @@ exports.createProject = async (req, res) => {
       client: client._id,
       // We'll set a default/placeholder project manager or make it optional
       projectManager: null, // Admin will assign later
-      status: 'Planning',
+      status: status || 'Planning',
       priority: priority || 'Medium',
       startDate: startDate,
       endDate: deadline,
