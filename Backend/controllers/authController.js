@@ -9,6 +9,8 @@ const bcrypt = require("bcryptjs");
 // @route   POST /api/auth/register
 // @access  Public
 exports.register = async (req, res) => {
+  let createdUser = null; // ✅ Track created user for cleanup
+
   try {
     const {
       name,
@@ -78,89 +80,111 @@ exports.register = async (req, res) => {
 
     // 1. Create User
     const user = await User.create(userData);
+    createdUser = user; // ✅ Save reference for potential cleanup
 
     // 2. Create Role-specific Profile
     let roleProfile = null;
     let profileResponse = null;
 
-    if (role === "employee") {
-      // Generate employee ID
-      const employeeCount = await Employee.countDocuments();
-      const employeeId = `EMP${(employeeCount + 1).toString().padStart(4, "0")}`;
+    try {
+      // ✅ Wrap profile creation in try-catch for cleanup
+      if (role === "employee") {
+        // Generate employee ID
+        const employeeCount = await Employee.countDocuments();
+        const employeeId = `EMP${(employeeCount + 1).toString().padStart(4, "0")}`;
 
-      roleProfile = await Employee.create({
-        userId: user._id,
-        employeeId: employeeId,
-        designation: designation,
-        department: department,
-        joiningDate: new Date(),
-        salary: 0, // Default salary, admin can update later
-        isActive: true,
-      });
-
-      profileResponse = {
-        employeeId: roleProfile.employeeId,
-        designation: roleProfile.designation,
-        department: roleProfile.department,
-        joiningDate: roleProfile.joiningDate,
-      };
-    } else if (role === "client") {
-      // Generate client ID
-      const clientCount = await Client.countDocuments();
-      const clientId = `CL${(clientCount + 1).toString().padStart(4, "0")}`; // Changed to CL prefix to match getProfile
-
-      roleProfile = await Client.create({
-        userId: user._id,
-        clientId: clientId,
-        companyName: company || req.body.companyName || `${name}'s Company`,
-        companyEmail: email,
-        contactPerson: {
+        roleProfile = await Employee.create({
+          userId: user._id,
+          employeeId: employeeId,
           name: name,
           email: email,
           phone: phone || "",
-        },
-        address: {
-          street: "",
-          city: "",
-          state: "",
-          country: "",
-          zipCode: "",
-        },
-        taxInfo: {
-          taxId: "",
-          gstNumber: "",
-          panNumber: "",
-        },
-        isActive: true,
-      });
+          position: designation,
+          designation: designation,
+          department: department,
+          joiningDate: new Date(),
+          joinDate: new Date(),
+          salary: 0,
+          isActive: true,
+          status: "active",
+        });
 
-      profileResponse = {
-        clientId: roleProfile.clientId,
-        companyName: roleProfile.companyName,
-        companyEmail: roleProfile.companyEmail,
-      };
-    } else if (role === "admin") {
-      // Only allow admin creation in specific scenarios
-      // You might want to restrict this to only be done via seed script
-      roleProfile = await Admin.create({
-        userId: user._id,
-        designation: "System Administrator",
-        permissions: {
-          manageEmployees: true,
-          manageClients: true,
-          manageProjects: true,
-          manageTasks: true,
-          manageAttendance: true,
-          manageMeetings: true,
-          viewReports: true,
-          manageSettings: true,
-        },
-      });
+        profileResponse = {
+          employeeId: roleProfile.employeeId,
+          designation: roleProfile.designation,
+          department: roleProfile.department,
+          joiningDate: roleProfile.joiningDate,
+        };
+      } else if (role === "client") {
+        // Generate client ID
+        const clientCount = await Client.countDocuments();
+        const clientId = `CL${(clientCount + 1).toString().padStart(4, "0")}`;
 
-      profileResponse = {
-        designation: roleProfile.designation,
-        permissions: roleProfile.permissions,
-      };
+        roleProfile = await Client.create({
+          userId: user._id,
+          clientId: clientId,
+          companyName: company || req.body.companyName || `${name}'s Company`,
+          companyEmail: email,
+          contactPerson: {
+            name: name,
+            email: email,
+            phone: phone || "",
+          },
+          address: {
+            street: "",
+            city: "",
+            state: "",
+            country: "",
+            zipCode: "",
+          },
+          taxInfo: {
+            taxId: "",
+            gstNumber: "",
+            panNumber: "",
+          },
+          isActive: true,
+        });
+
+        profileResponse = {
+          clientId: roleProfile.clientId,
+          companyName: roleProfile.companyName,
+          companyEmail: roleProfile.companyEmail,
+        };
+      } else if (role === "admin") {
+        roleProfile = await Admin.create({
+          userId: user._id,
+          designation: "System Administrator",
+          permissions: {
+            manageEmployees: true,
+            manageClients: true,
+            manageProjects: true,
+            manageTasks: true,
+            manageAttendance: true,
+            manageMeetings: true,
+            viewReports: true,
+            manageSettings: true,
+          },
+        });
+
+        profileResponse = {
+          designation: roleProfile.designation,
+          permissions: roleProfile.permissions,
+        };
+      }
+    } catch (profileError) {
+      // ✅ Profile creation failed - cleanup user and return error
+      console.error('Profile creation failed:', profileError);
+      
+      if (createdUser) {
+        await User.findByIdAndDelete(createdUser._id);
+        console.log(`Cleaned up user ${createdUser.email} after ${role} profile creation failure`);
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: `Failed to create ${role} profile. Please check all required fields.`,
+        error: profileError.message
+      });
     }
 
     // 3. Generate JWT token
@@ -177,7 +201,7 @@ exports.register = async (req, res) => {
       designation: user.designation,
       isActive: user.isActive,
       createdAt: user.createdAt,
-      profile: profileResponse, // Include role profile in response
+      profile: profileResponse,
     };
 
     res.status(201).json({
@@ -189,9 +213,18 @@ exports.register = async (req, res) => {
   } catch (error) {
     console.error("Register error:", error);
 
-    // If user was created but role profile failed, delete the user
+    // ✅ Cleanup user if it was created but something else failed
+    if (createdUser) {
+      try {
+        await User.findByIdAndDelete(createdUser._id);
+        console.log(`Cleaned up user ${createdUser.email} after registration error`);
+      } catch (cleanupError) {
+        console.error('Error during user cleanup:', cleanupError);
+      }
+    }
+
+    // Handle duplicate key error
     if (error.message.includes("E11000")) {
-      // Duplicate key error
       return res.status(400).json({
         success: false,
         message: "Duplicate entry detected. Please try with different details.",

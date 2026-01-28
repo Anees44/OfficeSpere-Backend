@@ -121,6 +121,29 @@ const clientSchema = new mongoose.Schema(
   }
 );
 
+clientSchema.virtual('user').get(function() {
+  return this.userId;
+});
+clientSchema.virtual('company').get(function() {
+  return this.companyName;
+}).set(function(value) {
+  this.companyName = value;
+});
+
+clientSchema.virtual('projectsCount').get(function() {
+  return this.projects?.length || 0;
+});
+
+clientSchema.virtual('website').get(function() {
+  return this.companyWebsite;
+}).set(function(value) {
+  this.companyWebsite = value;
+});
+
+// Enable virtuals
+clientSchema.set('toJSON', { virtuals: true });
+clientSchema.set('toObject', { virtuals: true });
+
 // Index for faster queries
 clientSchema.index({ companyName: 1 });
 

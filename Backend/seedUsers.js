@@ -2,7 +2,7 @@ const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const User = require('./models/User');
 
-dotenv.config(); // loads .env from same folder
+dotenv.config();
 
 const users = [
   {
@@ -11,6 +11,7 @@ const users = [
     password: 'admin123',
     role: 'admin',
   },
+
 ];
 
 const seedUsers = async () => {
@@ -31,3 +32,5 @@ const seedUsers = async () => {
 };
 
 seedUsers();
+
+

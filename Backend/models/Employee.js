@@ -14,9 +14,31 @@ const employeeSchema = new mongoose.Schema(
       unique: true,
       uppercase: true,
     },
+    name: {
+      // ADD THIS
+      type: String,
+      required: false,
+    },
+    email: {
+      // ADD THIS
+      type: String,
+      required: false,
+      unique: true,
+      lowercase: true,
+    },
+    phone: {
+      // ADD THIS
+      type: String,
+      default: "",
+    },
+    position: {
+      // ADD THIS - rename from 'designation'
+      type: String,
+      required: [true, "Please provide position"],
+    },
     designation: {
       type: String,
-      required: [true, "Please provide designation"],
+      required: false,
     },
     department: {
       type: String,
@@ -31,6 +53,18 @@ const employeeSchema = new mongoose.Schema(
         "Operations",
         "Management",
       ],
+    },
+    status: {
+      // ADD THIS - for active/inactive
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
+    joinDate: {
+      // ADD THIS - rename from 'joiningDate'
+      type: Date,
+      required: [true, "Please provide joining date"],
+      default: Date.now,
     },
     joiningDate: {
       type: Date,
@@ -119,6 +153,32 @@ const employeeSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+employeeSchema.pre('save', function(next) {
+  // Sync designation with position
+  if (this.position && !this.designation) {
+    this.designation = this.position;
+  } else if (this.designation && !this.position) {
+    this.position = this.designation;
+  }
+  
+  // Sync joinDate with joiningDate
+  if (this.joinDate && !this.joiningDate) {
+    this.joiningDate = this.joinDate;
+  } else if (this.joiningDate && !this.joinDate) {
+    this.joinDate = this.joiningDate;
+  }
+  
+  // Sync status with isActive
+  if (this.status === 'inactive') {
+    this.isActive = false;
+  } else if (this.status === 'active') {
+    this.isActive = true;
+  }
+  
+  next();
+});
+
 
 // Index for faster queries
 employeeSchema.index({ department: 1 });
