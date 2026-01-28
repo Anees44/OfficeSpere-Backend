@@ -18,7 +18,7 @@ const attendanceSchema = new mongoose.Schema(
       type: Date,
     },
     checkInLocation: {
-      type: String,
+      type: Object,
       enum: ['Office', 'Remote', 'Field'],
       default: 'Office',
       latitude: Number,
