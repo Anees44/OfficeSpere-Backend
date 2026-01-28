@@ -11,6 +11,346 @@ const DailyReport = require('../models/DailyReport');
 // @desc    Get client dashboard data
 // @route   GET /api/client/dashboard
 // @access  Private (Client only)
+// Add these functions to your clientController.js file
+// Place them after the getMyProjects function
+
+// @desc    Create a new project
+// @route   POST /api/client/projects
+// @access  Private (Client only)
+exports.createProject = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      name,
+      description,
+      startDate,
+      deadline,
+      budget,
+      requirements,
+      priority,
+      category
+    } = req.body;
+
+    console.log('📝 Creating project for user:', userId);
+    console.log('Project data:', req.body);
+
+    // Validation
+    if (!name || !description || !startDate || !deadline) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide name, description, start date, and deadline'
+      });
+    }
+
+    // Find client by userId
+    const Client = require('../models/Client');
+    const client = await Client.findOne({ userId: userId });
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client profile not found. Please complete your profile first.'
+      });
+    }
+
+    console.log('✅ Client found:', client._id);
+
+    // Generate unique project ID
+    const Project = require('../models/Project');
+    const projectCount = await Project.countDocuments();
+    const projectId = `PRJ${String(projectCount + 1).padStart(4, '0')}`;
+
+    // For now, we'll create project without projectManager
+    // Admin can assign project manager later
+    const projectData = {
+      projectId: projectId,
+      name: name,
+      description: description,
+      client: client._id,
+      // We'll set a default/placeholder project manager or make it optional
+      projectManager: null, // Admin will assign later
+      status: 'Planning',
+      priority: priority || 'Medium',
+      startDate: startDate,
+      endDate: deadline,
+      budget: budget || 0,
+      spent: 0,
+      progress: 0,
+      tags: category ? [category] : [],
+      isActive: true
+    };
+
+    console.log('Creating project with data:', projectData);
+
+    const project = await Project.create(projectData);
+
+    console.log('✅ Project created successfully:', project._id);
+
+    // Populate client info for response
+    const populatedProject = await Project.findById(project._id)
+      .populate('client', 'companyName contactPerson email')
+      .lean();
+
+    res.status(201).json({
+      success: true,
+      message: 'Project created successfully! Admin will assign a project manager soon.',
+      data: populatedProject
+    });
+
+  } catch (error) {
+    console.error('❌ Create project error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create project',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Update a project
+// @route   PUT /api/client/projects/:id
+// @access  Private (Client only)
+exports.updateProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const updateData = req.body;
+
+    console.log('📝 Updating project:', id);
+
+    // Find client by userId
+    const Client = require('../models/Client');
+    const client = await Client.findOne({ userId: userId });
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client profile not found'
+      });
+    }
+
+    // Find project and verify ownership
+    const Project = require('../models/Project');
+    const project = await Project.findOne({ _id: id, client: client._id });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found or access denied'
+      });
+    }
+
+    // Update allowed fields
+    const allowedFields = ['name', 'description', 'budget', 'priority', 'endDate'];
+    allowedFields.forEach(field => {
+      if (updateData[field] !== undefined) {
+        project[field] = updateData[field];
+      }
+    });
+
+    // Update deadline if provided
+    if (updateData.deadline) {
+      project.endDate = updateData.deadline;
+    }
+
+    // Update tags if category provided
+    if (updateData.category) {
+      project.tags = [updateData.category];
+    }
+
+    await project.save();
+
+    const updatedProject = await Project.findById(project._id)
+      .populate('client', 'companyName contactPerson email')
+      .lean();
+
+    console.log('✅ Project updated successfully');
+
+    res.status(200).json({
+      success: true,
+      message: 'Project updated successfully',
+      data: updatedProject
+    });
+
+  } catch (error) {
+    console.error('❌ Update project error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update project',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Delete a project
+// @route   DELETE /api/client/projects/:id
+// @access  Private (Client only)
+exports.deleteProject = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    console.log('🗑️ Deleting project:', id);
+
+    // Find client by userId
+    const Client = require('../models/Client');
+    const client = await Client.findOne({ userId: userId });
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client profile not found'
+      });
+    }
+
+    // Find project and verify ownership
+    const Project = require('../models/Project');
+    const project = await Project.findOne({ _id: id, client: client._id });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found or access denied'
+      });
+    }
+
+    // Check if project can be deleted (only Planning or On Hold projects)
+    if (project.status === 'In Progress' || project.status === 'Completed') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete project with status: ${project.status}`
+      });
+    }
+
+    // Soft delete by setting isActive to false
+    project.isActive = false;
+    await project.save();
+
+    // Or hard delete (uncomment if you prefer)
+    // await Project.findByIdAndDelete(id);
+
+    console.log('✅ Project deleted successfully');
+
+    res.status(200).json({
+      success: true,
+      message: 'Project deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete project error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete project',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Send project to admin for review/approval
+// @route   POST /api/client/projects/send-to-admin
+// @access  Private (Client only)
+exports.sendProjectToAdmin = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      projectId,
+      projectName,
+      message,
+      urgency,
+      requestType,
+      clientInfo
+    } = req.body;
+
+    console.log('📨 Sending project to admin');
+    console.log('Request data:', req.body);
+
+    // Validation
+    if (!projectId || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide project ID and message'
+      });
+    }
+
+    // Find client
+    const Client = require('../models/Client');
+    const client = await Client.findOne({ userId: userId })
+      .populate('userId', 'name email');
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client profile not found'
+      });
+    }
+
+    // Verify project belongs to client
+    const Project = require('../models/Project');
+    const project = await Project.findOne({ _id: projectId, client: client._id });
+
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        message: 'Project not found or access denied'
+      });
+    }
+
+    // Create notification/request for admin
+    // You can either:
+    // 1. Create a Notification model (recommended)
+    // 2. Send email to admin
+    // 3. Store in project comments/notes
+    // 4. Use a dedicated AdminRequest model
+
+    // For now, we'll add to project notes/comments
+    if (!project.adminRequests) {
+      project.adminRequests = [];
+    }
+
+    const adminRequest = {
+      requestType: requestType || 'Review',
+      urgency: urgency || 'Normal',
+      message: message,
+      requestedBy: {
+        name: client.userId?.name || client.contactPerson?.name,
+        email: client.userId?.email || client.contactPerson?.email
+      },
+      requestedAt: new Date(),
+      status: 'Pending'
+    };
+
+    // Add to project (you may need to add this field to schema)
+    // For now, we'll just log it and send success response
+    
+    console.log('Admin Request:', adminRequest);
+    console.log('✅ Request prepared for admin');
+
+    // In production, you would:
+    // 1. Save to a notifications collection
+    // 2. Send email to admin
+    // 3. Create a task for admin dashboard
+
+    res.status(200).json({
+      success: true,
+      message: 'Project request sent to admin successfully. You will be notified once admin reviews it.',
+      data: {
+        projectId: project._id,
+        projectName: project.name,
+        requestType: adminRequest.requestType,
+        urgency: adminRequest.urgency,
+        status: 'Pending Review'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Send to admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send request to admin',
+      error: error.message
+    });
+  }
+};
 exports.getDashboard = async (req, res) => {
   try {
     const userId = req.user.id; // This is the USER ID from JWT

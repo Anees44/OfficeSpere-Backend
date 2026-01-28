@@ -25,7 +25,7 @@ const projectSchema = new mongoose.Schema(
     projectManager: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Employee',
-      required: true,
+      required: false, // Changed to optional - admin can assign later
     },
     team: [
       {
@@ -130,6 +130,41 @@ const projectSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // NEW: Admin requests from client
+    adminRequests: [
+      {
+        requestType: {
+          type: String,
+          enum: ['Review', 'Approval', 'Discussion', 'Update', 'Issue', 'Other'],
+          default: 'Review'
+        },
+        urgency: {
+          type: String,
+          enum: ['Low', 'Normal', 'High', 'Urgent'],
+          default: 'Normal'
+        },
+        message: String,
+        requestedBy: {
+          name: String,
+          email: String
+        },
+        requestedAt: {
+          type: Date,
+          default: Date.now
+        },
+        status: {
+          type: String,
+          enum: ['Pending', 'In Progress', 'Resolved', 'Rejected'],
+          default: 'Pending'
+        },
+        adminResponse: String,
+        respondedAt: Date,
+        respondedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User'
+        }
+      }
+    ],
     isActive: {
       type: Boolean,
       default: true,

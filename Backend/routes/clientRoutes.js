@@ -19,6 +19,12 @@ router.get('/projects/:id/progress', clientController.getProjectProgress);
 router.get('/projects/:id/timeline', clientController.getProjectTimeline);
 router.get('/projects/:id/milestones', clientController.getProjectMilestones);
 
+// ============ NEW ROUTES ============
+router.post('/projects', clientController.createProject); // Create new project
+router.put('/projects/:id', clientController.updateProject); // Update project
+router.delete('/projects/:id', clientController.deleteProject); // Delete project
+router.post('/projects/send-to-admin', clientController.sendProjectToAdmin); // Send project to admin
+
 // Meeting Routes
 router.get('/meetings', clientController.getMyMeetings);
 router.get('/meetings/:id', clientController.getMeeting);
