@@ -18,10 +18,11 @@ const {
   deleteClient,
   getProjects,
   getSettings,
-  updateSettings
+  updateSettings,
+  getDailyAttendance  // ✅ MUST BE HERE
 } = require('../controllers/adminController');
 
-// ✅ Import from projectController for CRUD operations
+// ✅ Import from projectController
 const {
   getProject,
   createProject,
@@ -51,6 +52,16 @@ router.use(authorize('admin'));
 router.get('/dashboard', getDashboard);
 
 // ============================================
+// ATTENDANCE ROUTES - PLACE EARLY
+// ============================================
+router.get('/attendance', (req, res, next) => {
+  console.log('🎯 ATTENDANCE ROUTE HIT!');
+  console.log('URL:', req.originalUrl);
+  console.log('Query:', req.query);
+  next();
+}, getDailyAttendance);
+
+// ============================================
 // EMPLOYEE ROUTES
 // ============================================
 router.route('/employees')
@@ -75,18 +86,18 @@ router.route('/clients/:id')
   .delete(deleteClient);
 
 // ============================================
-// PROJECT ROUTES - ADMIN MANAGES ALL PROJECTS
+// PROJECT ROUTES
 // ============================================
 router.route('/projects')
-  .get(getProjects)      // Get all projects (from adminController)
-  .post(createProject);  // Create new project (from projectController)
+  .get(getProjects)
+  .post(createProject);
 
 router.route('/projects/:id')
-  .get(getProject)       // Get single project (from projectController)
-  .put(updateProject)    // ✅ UPDATE PROJECT - This was missing!
-  .delete(deleteProject); // Delete project (from projectController)
+  .get(getProject)
+  .put(updateProject)
+  .delete(deleteProject);
 
-router.post('/projects/:id/assign', assignTeam); // Assign team to project
+router.post('/projects/:id/assign', assignTeam);
 
 // ============================================
 // TASK ROUTES
