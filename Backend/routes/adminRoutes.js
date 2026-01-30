@@ -21,6 +21,14 @@ const {
   updateSettings,
   getDailyAttendance  // ✅ MUST BE HERE
 } = require('../controllers/adminController');
+const {
+  getAdminNotifications,
+  markAsRead,
+  markAsUnread,
+  markAllRead,
+  deleteNotification,
+  deleteMany
+} = require('../controllers/notificationController.js');
 
 // ✅ Import from projectController
 const {
@@ -50,6 +58,16 @@ router.use(authorize('admin'));
 // DASHBOARD ROUTES
 // ============================================
 router.get('/dashboard', getDashboard);
+
+// ============================================
+// 🔔 NOTIFICATION ROUTES
+// ============================================
+router.get('/notifications', getAdminNotifications);
+router.patch('/notifications/:id/read', markAsRead);
+router.patch('/notifications/:id/unread', markAsUnread);
+router.patch('/notifications/mark-all-read', markAllRead);
+router.delete('/notifications/:id', deleteNotification);
+router.post('/notifications/delete-many', deleteMany);
 
 // ============================================
 // ATTENDANCE ROUTES - PLACE EARLY

@@ -120,8 +120,9 @@ exports.checkOut = async (req, res) => {
       const io = getIO();
       io.to('admin').emit('attendance-updated', {
         employeeId: employeeId,
-        employeeName: employee.userId?.name || employee.name,
+        employeeName: employee?.userId?.name || 'Unknown',
         checkOut: attendance.checkOutTime,
+        checkIn: attendance.checkInTime,
         workHours: attendance.workHours,
         date: attendance.date
       });
@@ -145,158 +146,550 @@ exports.checkOut = async (req, res) => {
   }
 }
 
+// Fixed checkIn function for attendanceController.js
+// Replace your existing checkIn function with this
+
+// controllers/attendanceController.js
+// UPDATED - Fixed employeeId resolution
+
+
+// ==========================================
+// EMPLOYEE - Check In
+// ==========================================
 exports.checkIn = async (req, res) => {
   try {
-    const employeeId = req.user.id;
-    const { location, notes } = req.body;
+    // ✅ FIX: Handle different ways employeeId might be stored in req.user
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
 
-    const employee = await Employee.findOne({ userId: employeeId });
+    // If user is an employee and their ID is stored directly
+    if (!employeeId && req.user.role === 'employee') {
+      employeeId = req.user._id || req.user.id;
+    }
 
-    if (!employee) {
-      return res.status(404).json({
+    const { location, notes, timestamp } = req.body;
+
+    console.log('📥 Check-in request received:', {
+      fullUser: req.user,
+      employeeId,
+      location,
+      notes,
+      timestamp
+    });
+
+    if (!employeeId) {
+      console.error('❌ No employeeId found in req.user:', req.user);
+      return res.status(400).json({
         success: false,
-        message: 'Employee not found'
+        message: 'Employee ID not found. Please contact administrator.',
+        debug: {
+          user: req.user,
+          note: 'employeeId field is missing'
+        }
       });
     }
 
-    // Check if already checked in today
+    // Get today's date (start of day)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    // Check if already checked in today
     const existingAttendance = await Attendance.findOne({
-      employeeId: employee._id,
-      date: { $gte: today }
+      employeeId,
+      date: today
     });
 
-    if (existingAttendance) {
-      if (existingAttendance.checkInTime) {
-        return res.status(400).json({
-          success: false,
-          message: 'Already checked in today',
-          data: existingAttendance
-        });
-      }
+    if (existingAttendance && existingAttendance.checkInTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already checked in today',
+        data: existingAttendance
+      });
     }
 
-    const checkInTime = new Date();
-    
-    // Determine if late (assuming office starts at 9:00 AM)
-    const officeStartTime = new Date(today);
-    officeStartTime.setHours(9, 0, 0, 0);
-    
-    const isLate = checkInTime > officeStartTime;
+    // Prepare check-in data
+    const checkInTime = timestamp ? new Date(timestamp) : new Date();
 
-    const attendance = await Attendance.create({
-      employeeId: employee._id,
+    // Build attendance data object
+    const attendanceData = {
+      employeeId,
       date: today,
       checkInTime,
-      checkInLocation: location || 'Office',
-      status: isLate ? 'late' : 'present',
-      isLate,
-      notes: notes || ''
-    });
+      checkInMethod: 'Manual',
+      status: 'present'
+    };
 
-    res.status(201).json({
+    // ✅ Handle location data properly
+    if (location) {
+      // If location is an object with coordinates
+      if (location.latitude !== undefined && location.longitude !== undefined) {
+        // Save coordinates to checkInCoordinates (Object field)
+        attendanceData.checkInCoordinates = {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy || 0
+        };
+
+        // Set checkInLocation to a STRING enum value
+        attendanceData.checkInLocation = 'Remote'; // or 'Office' or 'Field'
+      } else if (typeof location === 'string') {
+        // If location is already a string
+        attendanceData.checkInLocation = location;
+      }
+    } else {
+      // Default if no location provided
+      attendanceData.checkInLocation = 'Office';
+    }
+
+    // Add IP address if available
+    attendanceData.checkInIpAddress = req.ip || req.connection.remoteAddress;
+
+    // Add device info if available
+    attendanceData.checkInDeviceInfo = req.headers['user-agent'];
+
+    // Add notes if provided
+    if (notes) {
+      attendanceData.notes = notes;
+    }
+
+    console.log('💾 Saving attendance data:', attendanceData);
+
+    // Create or update attendance record
+    let attendance;
+    if (existingAttendance) {
+      // Update existing record
+      Object.assign(existingAttendance, attendanceData);
+      attendance = await existingAttendance.save();
+    } else {
+      // Create new record
+      attendance = await Attendance.create(attendanceData);
+    }
+
+    console.log('✅ Check-in successful:', attendance);
+
+    res.status(200).json({
       success: true,
-      message: `Checked in successfully${isLate ? ' (Late)' : ''}`,
-      data: attendance
+      message: 'Checked in successfully',
+      data: attendance,
+      checkInTime: attendance.checkInTime
     });
 
   } catch (error) {
-    console.error('Check in error:', error);
+    console.error('❌ Check in error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: error.message || 'Failed to check in',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
 
-// @desc    Check out (Clock out)
-// @route   POST /api/employee/attendance/checkout
-// @access  Private (Employee)
+// ==========================================
+// EMPLOYEE - Check Out
+// ==========================================
 exports.checkOut = async (req, res) => {
   try {
-    const employeeId = req.user.id;
-    const { location, notes } = req.body;
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
+    const { location, timestamp, totalSeconds, autoCheckout, reason } = req.body;
 
-    const employee = await Employee.findOne({ userId: employeeId });
-
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee not found'
-      });
-    }
-
-    // Find today's attendance record
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const attendance = await Attendance.findOne({
-      employeeId: employee._id,
-      date: { $gte: today }
+      employeeId,
+      date: today
     });
 
-    if (!attendance) {
-      return res.status(404).json({
+    if (!attendance || !attendance.checkInTime) {
+      return res.status(400).json({
         success: false,
-        message: 'No check-in record found for today'
+        message: 'No check-in record found'
       });
     }
 
     if (attendance.checkOutTime) {
       return res.status(400).json({
         success: false,
-        message: 'Already checked out today',
-        data: attendance
+        message: 'Already checked out'
       });
     }
 
-    const checkOutTime = new Date();
-    
-    // Calculate work hours
-    const workHours = (checkOutTime - attendance.checkInTime) / (1000 * 60 * 60); // Convert to hours
-
+    // ✅ Set checkout time
+    const checkOutTime = timestamp ? new Date(timestamp) : new Date();
     attendance.checkOutTime = checkOutTime;
-    attendance.checkOutLocation = location || 'Office';
-    attendance.workHours = parseFloat(workHours.toFixed(2));
-    
-    if (notes) {
-      attendance.notes = attendance.notes 
-        ? `${attendance.notes}\n${notes}` 
-        : notes;
+
+    // ✅ Handle location
+    if (location?.latitude && location?.longitude) {
+      attendance.checkOutCoordinates = {
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracy || 0
+      };
+      attendance.checkOutLocation = 'Remote';
+    } else {
+      attendance.checkOutLocation = 'Office';
     }
+
+    attendance.checkOutMethod = 'Manual';
+    attendance.checkOutIpAddress = req.ip;
+    attendance.checkOutDeviceInfo = req.headers['user-agent'];
+
+    // ✅ Auto-checkout notes
+    if (autoCheckout) {
+      attendance.notes = (attendance.notes || '') + ` | Auto checkout: ${reason}`;
+    }
+
+    // ✅ Calculate work hours
+    const diffMs = checkOutTime - attendance.checkInTime;
+    attendance.workHours = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
 
     await attendance.save();
 
+    // ✅ Emit socket event
+    try {
+      const io = getIO();
+      const employee = await Employee.findById(employeeId).populate('userId', 'name');
+      
+      io.to('admin').emit('attendance-updated', {
+        employeeId: employeeId,
+        employeeName: employee?.userId?.name || 'Unknown',
+        checkOut: attendance.checkOutTime,
+        checkIn: attendance.checkInTime,
+        workHours: attendance.workHours,
+        date: attendance.date
+      });
+    } catch (socketError) {
+      console.error('Socket error:', socketError);
+    }
+
+    // ✅ Return complete data
     res.status(200).json({
       success: true,
       message: 'Checked out successfully',
-      data: attendance
+      data: attendance,
+      checkOut: attendance.checkOutTime,  // ✅ Explicit field
+      checkInTime: attendance.checkInTime,
+      workHours: attendance.workHours
     });
 
   } catch (error) {
     console.error('Check out error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: error.message || 'Failed to check out'
     });
   }
 };
 
+// ==========================================
+// EMPLOYEE - Get Attendance Status
+// ==========================================
+exports.getAttendanceStatus = async (req, res) => {
+  try {
+    // ✅ FIX: Handle different ways employeeId might be stored
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
+
+    if (!employeeId && req.user.role === 'employee') {
+      employeeId = req.user._id || req.user.id;
+    }
+
+    console.log('📊 Getting attendance status for:', {
+      fullUser: req.user,
+      employeeId
+    });
+
+    if (!employeeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Employee ID not found'
+      });
+    }
+
+    // Get today's date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Find today's attendance
+    const attendance = await Attendance.findOne({
+      employeeId,
+      date: today
+    });
+
+    if (!attendance) {
+      return res.status(200).json({
+        success: true,
+        message: 'No attendance record for today',
+        data: null,
+        isCheckedIn: false,
+        isCheckedOut: false
+      });
+    }
+
+    const isCheckedIn = !!attendance.checkInTime && !attendance.checkOutTime;
+    const isCheckedOut = !!attendance.checkInTime && !!attendance.checkOutTime;
+
+    res.status(200).json({
+      success: true,
+      data: attendance,
+      isCheckedIn,
+      isCheckedOut,
+      checkInTime: attendance.checkInTime,
+      checkOut: attendance.checkOutTime,
+      status: attendance.status
+    });
+
+  } catch (error) {
+    console.error('❌ Get attendance status error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to get attendance status'
+    });
+  }
+};
+
+// ==========================================
+// EMPLOYEE - Get My Attendance
+// ==========================================
+exports.getMyAttendance = async (req, res) => {
+  try {
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
+
+    if (!employeeId && req.user.role === 'employee') {
+      employeeId = req.user._id || req.user.id;
+    }
+
+    const { startDate, endDate, page = 1, limit = 30 } = req.query;
+
+    const query = { employeeId };
+
+    // Date filtering
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [attendance, total] = await Promise.all([
+      Attendance.find(query)
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Attendance.countDocuments(query)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: attendance,
+      pagination: {
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Get my attendance error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to get attendance records'
+    });
+  }
+};
+
+// ==========================================
+// EMPLOYEE - Get Attendance Summary
+// ==========================================
+exports.getAttendanceSummary = async (req, res) => {
+  try {
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
+
+    if (!employeeId && req.user.role === 'employee') {
+      employeeId = req.user._id || req.user.id;
+    }
+
+    const { month, year } = req.query;
+
+    const currentDate = new Date();
+    const targetMonth = month ? parseInt(month) - 1 : currentDate.getMonth();
+    const targetYear = year ? parseInt(year) : currentDate.getFullYear();
+
+    const startDate = new Date(targetYear, targetMonth, 1);
+    const endDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59);
+
+    const attendance = await Attendance.find({
+      employeeId,
+      date: { $gte: startDate, $lte: endDate }
+    });
+
+    const summary = {
+      totalDays: attendance.length,
+      present: attendance.filter(a => a.status === 'present').length,
+      absent: attendance.filter(a => a.status === 'absent').length,
+      late: attendance.filter(a => a.isLate).length,
+      leaves: attendance.filter(a => a.status === 'leave').length,
+      workFromHome: attendance.filter(a => a.status === 'work-from-home').length,
+      totalWorkHours: attendance.reduce((sum, a) => sum + (a.workHours || 0), 0),
+      averageWorkHours: attendance.length > 0
+        ? attendance.reduce((sum, a) => sum + (a.workHours || 0), 0) / attendance.length
+        : 0
+    };
+
+    res.status(200).json({
+      success: true,
+      data: summary,
+      month: targetMonth + 1,
+      year: targetYear
+    });
+
+  } catch (error) {
+    console.error('❌ Get attendance summary error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to get attendance summary'
+    });
+  }
+};
+
+// ==========================================
+// EMPLOYEE - Request Correction
+// ==========================================
+exports.requestCorrection = async (req, res) => {
+  try {
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
+
+    if (!employeeId && req.user.role === 'employee') {
+      employeeId = req.user._id || req.user.id;
+    }
+
+    const { date, reason, correctCheckInTime, correctCheckOutTime } = req.body;
+
+    const attendance = await Attendance.findOne({
+      employeeId,
+      date: new Date(date)
+    });
+
+    if (!attendance) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attendance record not found'
+      });
+    }
+
+    attendance.correctionRequest = {
+      requestedBy: req.user.id || req.user._id,
+      reason,
+      correctCheckInTime: correctCheckInTime ? new Date(correctCheckInTime) : undefined,
+      correctCheckOutTime: correctCheckOutTime ? new Date(correctCheckOutTime) : undefined,
+      status: 'pending',
+      requestedAt: new Date()
+    };
+
+    await attendance.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Correction request submitted successfully',
+      data: attendance
+    });
+
+  } catch (error) {
+    console.error('❌ Request correction error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to request correction'
+    });
+  }
+};
+
+// ==========================================
+// EMPLOYEE - Request Leave
+// ==========================================
+exports.requestLeave = async (req, res) => {
+  try {
+    let employeeId = req.user.employeeId || req.user.employee || req.user._id || req.user.id;
+
+    if (!employeeId && req.user.role === 'employee') {
+      employeeId = req.user._id || req.user.id;
+    }
+
+    const { date, leaveType, reason } = req.body;
+
+    const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+
+    // Check if attendance already exists
+    let attendance = await Attendance.findOne({
+      employeeId,
+      date: targetDate
+    });
+
+    if (attendance) {
+      // Update existing record
+      attendance.leaveRequest = {
+        leaveType,
+        reason,
+        status: 'pending',
+        requestedAt: new Date()
+      };
+      attendance.status = 'leave';
+    } else {
+      // Create new record
+      attendance = await Attendance.create({
+        employeeId,
+        date: targetDate,
+        status: 'leave',
+        leaveRequest: {
+          leaveType,
+          reason,
+          status: 'pending',
+          requestedAt: new Date()
+        }
+      });
+    }
+
+    await attendance.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Leave request submitted successfully',
+      data: attendance
+    });
+
+  } catch (error) {
+    console.error('❌ Request leave error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to request leave'
+    });
+  }
+};
+
+// Placeholder for other functions
+exports.getMyCorrections = async (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+};
+
+exports.getMyLeaves = async (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+};
+
+exports.getTodayAttendance = async (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+};
+
+module.exports = exports;
 // @desc    Get my attendance records
 // @route   GET /api/employee/attendance
 // @access  Private (Employee)
 exports.getMyAttendance = async (req, res) => {
   try {
     const employeeId = req.user.id;
-    const { 
-      startDate, 
-      endDate, 
-      page = 1, 
-      limit = 10 
+    const {
+      startDate,
+      endDate,
+      page = 1,
+      limit = 10
     } = req.query;
 
     const employee = await Employee.findOne({ userId: employeeId });
@@ -384,16 +777,16 @@ exports.getAttendanceStatus = async (req, res) => {
       });
     }
 
-    const status = todayAttendance.checkOutTime 
-      ? 'checked-out' 
+    const status = todayAttendance.checkOutTime
+      ? 'checked-out'
       : 'checked-in';
 
     res.status(200).json({
       success: true,
       data: {
         status,
-        message: status === 'checked-in' 
-          ? 'You are currently checked in' 
+        message: status === 'checked-in'
+          ? 'You are currently checked in'
           : 'You have checked out for today',
         attendance: todayAttendance
       }
@@ -448,7 +841,7 @@ exports.getAttendanceSummary = async (req, res) => {
     const lateDays = attendance.filter(a => a.isLate).length;
     const absentDays = attendance.filter(a => a.status === 'absent').length;
     const leaveDays = attendance.filter(a => a.status === 'leave').length;
-    
+
     const totalWorkHours = attendance.reduce((sum, a) => sum + (a.workHours || 0), 0);
     const averageWorkHours = totalDays > 0 ? (totalWorkHours / totalDays).toFixed(2) : 0;
 
@@ -486,11 +879,11 @@ exports.getAttendanceSummary = async (req, res) => {
 exports.requestCorrection = async (req, res) => {
   try {
     const employeeId = req.user.id;
-    const { 
-      date, 
-      reason, 
-      correctCheckInTime, 
-      correctCheckOutTime 
+    const {
+      date,
+      reason,
+      correctCheckInTime,
+      correctCheckOutTime
     } = req.body;
 
     if (!date || !reason) {
@@ -568,11 +961,11 @@ exports.requestCorrection = async (req, res) => {
 exports.requestLeave = async (req, res) => {
   try {
     const employeeId = req.user.id;
-    const { 
-      startDate, 
-      endDate, 
-      leaveType, 
-      reason 
+    const {
+      startDate,
+      endDate,
+      leaveType,
+      reason
     } = req.body;
 
     if (!startDate || !endDate || !leaveType || !reason) {
@@ -593,7 +986,7 @@ exports.requestLeave = async (req, res) => {
 
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
-    
+
     const end = new Date(endDate);
     end.setHours(0, 0, 0, 0);
 
@@ -625,7 +1018,7 @@ exports.requestLeave = async (req, res) => {
 
     while (currentDate <= end) {
       const leaveDate = new Date(currentDate);
-      
+
       // Check if attendance record exists
       let attendance = await Attendance.findOne({
         employeeId: employee._id,
@@ -682,13 +1075,13 @@ exports.requestLeave = async (req, res) => {
 // @access  Private (Admin)
 exports.getAllAttendance = async (req, res) => {
   try {
-    const { 
-      startDate, 
-      endDate, 
+    const {
+      startDate,
+      endDate,
       employeeId,
       status,
-      page = 1, 
-      limit = 20 
+      page = 1,
+      limit = 20
     } = req.query;
 
     // Build query
@@ -776,8 +1169,8 @@ exports.getDailyAttendance = async (req, res) => {
       .populate('userId', 'name email');
 
     const checkedInEmployeeIds = attendance.map(a => a.employeeId._id.toString());
-    
-    const notCheckedIn = allEmployees.filter(emp => 
+
+    const notCheckedIn = allEmployees.filter(emp =>
       !checkedInEmployeeIds.includes(emp._id.toString())
     );
 
@@ -835,7 +1228,7 @@ exports.getMonthlyAttendance = async (req, res) => {
 
     attendance.forEach(record => {
       const empId = record.employeeId._id.toString();
-      
+
       if (!employeeStats[empId]) {
         employeeStats[empId] = {
           employee: {
@@ -854,7 +1247,7 @@ exports.getMonthlyAttendance = async (req, res) => {
       }
 
       employeeStats[empId].totalDays++;
-      
+
       if (record.status === 'present' || record.isLate) {
         employeeStats[empId].presentDays++;
       }
@@ -951,8 +1344,8 @@ exports.getAttendanceReport = async (req, res) => {
           lateCount,
           absentCount,
           leaveCount,
-          attendanceRate: totalRecords > 0 
-            ? ((presentCount / totalRecords) * 100).toFixed(2) 
+          attendanceRate: totalRecords > 0
+            ? ((presentCount / totalRecords) * 100).toFixed(2)
             : 0
         },
         records: attendance
@@ -1200,8 +1593,8 @@ exports.getEmployeeAttendance = async (req, res) => {
       leaveDays: records.filter(r => r.status === 'leave').length,
       halfDays: records.filter(r => r.status === 'half-day').length,
       totalWorkHours: records.reduce((sum, r) => sum + (r.workHours || 0), 0).toFixed(2),
-      averageWorkHours: records.length > 0 
-        ? (records.reduce((sum, r) => sum + (r.workHours || 0), 0) / records.length).toFixed(2) 
+      averageWorkHours: records.length > 0
+        ? (records.reduce((sum, r) => sum + (r.workHours || 0), 0) / records.length).toFixed(2)
         : 0,
       attendanceRate: records.length > 0
         ? (((records.filter(r => r.status === 'present' || r.status === 'late').length) / records.length) * 100).toFixed(2)
@@ -1349,7 +1742,7 @@ exports.exportAttendance = async (req, res) => {
     if (format === 'csv') {
       // Generate CSV
       const headers = Object.keys(exportData[0] || {}).join(',');
-      const rows = exportData.map(row => 
+      const rows = exportData.map(row =>
         Object.values(row).map(val => `"${val}"`).join(',')
       );
       const csv = [headers, ...rows].join('\n');

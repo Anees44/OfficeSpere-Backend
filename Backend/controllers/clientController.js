@@ -1386,9 +1386,21 @@ exports.getProfile = async (req, res) => {
 // @desc    Update client profile
 // @route   PUT /api/client/profile
 // @access  Private (Client only)
+// @desc    Update client profile
+// @route   PUT /api/client/profile
+// @access  Private (Client only)
+// controllers/clientController.js - UPDATED updateProfile function
+
 exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
+    
+    console.log('====================================');
+    console.log('📝 UPDATE CLIENT PROFILE');
+    console.log('User ID:', userId);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('====================================');
+
     const {
       name,
       email,
@@ -1406,62 +1418,170 @@ exports.updateProfile = async (req, res) => {
       taxId
     } = req.body;
 
+    // ✅ Validation: Name and email are required
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name is required',
+        errors: ['Please provide your name']
+      });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required',
+        errors: ['Please provide your email']
+      });
+    }
+
+    // ✅ Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email format',
+        errors: ['Please provide a valid email address']
+      });
+    }
+
     // Find client by userId
     let client = await Client.findOne({ userId: userId });
 
     if (!client) {
-      return res.status(404).json({
-        success: false,
-        message: 'Client profile not found'
+      console.log('❌ Client not found, creating new client...');
+      
+      // Generate client ID
+      const count = await Client.countDocuments();
+      const clientId = `CL${String(count + 1).padStart(4, '0')}`;
+      
+      // Create new client with minimal required fields
+      client = await Client.create({
+        userId: userId,
+        clientId: clientId,
+        companyName: companyName?.trim() || 'Not Set',
+        contactPerson: {
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone?.trim() || ''
+        },
+        address: {
+          street: address?.trim() || '',
+          city: city?.trim() || '',
+          state: state?.trim() || '',
+          country: country?.trim() || '',
+          zipCode: zipCode?.trim() || ''
+        },
+        taxInfo: {
+          taxId: taxId?.trim() || ''
+        },
+        isActive: true
       });
+      
+      console.log('✅ New client created:', client.clientId);
     }
 
     // Update User model fields
     const User = require('../models/User');
     const user = await User.findById(userId);
 
-    if (user) {
-      if (name) user.name = name;
-      if (email) user.email = email;
-      if (phone) user.phone = phone;
-      if (avatar) user.avatar = avatar;
-      await user.save();
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
     }
+
+    // Check if email is being changed and if it's already taken
+    if (email.trim() !== user.email) {
+      const existingUser = await User.findOne({ 
+        email: email.trim(),
+        _id: { $ne: userId }
+      });
+
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already in use',
+          errors: ['This email is already registered to another account']
+        });
+      }
+
+      user.email = email.trim();
+    }
+
+    // Update user fields
+    user.name = name.trim();
+    if (phone !== undefined) user.phone = phone?.trim() || '';
+    if (avatar !== undefined) user.avatar = avatar?.trim() || '';
+    
+    await user.save();
+    console.log('✅ User updated');
 
     // Update Client model fields
-    if (companyName !== undefined) client.companyName = companyName;
-    if (industry !== undefined) client.industry = industry;
-    if (website !== undefined) client.companyWebsite = website;
-    if (companySize !== undefined) client.companySize = companySize;
+    if (companyName !== undefined) {
+      client.companyName = companyName?.trim() || '';
+    }
+    
+    if (industry !== undefined) {
+      client.industry = industry?.trim() || '';
+    }
+    
+    if (website !== undefined) {
+      client.companyWebsite = website?.trim() || '';
+    }
+    
+    if (companySize !== undefined) {
+      client.companySize = companySize?.trim() || '';
+    }
 
-    // Update address - initialize if doesn't exist
+    // Initialize address if it doesn't exist
     if (!client.address) {
-      client.address = {};
+      client.address = {
+        street: '',
+        city: '',
+        state: '',
+        country: '',
+        zipCode: ''
+      };
     }
 
-    if (address !== undefined) client.address.street = address;
-    if (city !== undefined) client.address.city = city;
-    if (state !== undefined) client.address.state = state;
-    if (zipCode !== undefined) client.address.zipCode = zipCode;
-    if (country !== undefined) client.address.country = country;
+    // Update address fields
+    if (address !== undefined) client.address.street = address?.trim() || '';
+    if (city !== undefined) client.address.city = city?.trim() || '';
+    if (state !== undefined) client.address.state = state?.trim() || '';
+    if (zipCode !== undefined) client.address.zipCode = zipCode?.trim() || '';
+    if (country !== undefined) client.address.country = country?.trim() || '';
 
-    // Update tax info - initialize if doesn't exist
+    // Initialize taxInfo if it doesn't exist
     if (!client.taxInfo) {
-      client.taxInfo = {};
+      client.taxInfo = {
+        taxId: ''
+      };
     }
 
-    if (taxId !== undefined) client.taxInfo.taxId = taxId;
+    // Update tax info
+    if (taxId !== undefined) {
+      client.taxInfo.taxId = taxId?.trim() || '';
+    }
 
-    // Update contact person - initialize if doesn't exist
+    // Initialize contactPerson if it doesn't exist
     if (!client.contactPerson) {
-      client.contactPerson = {};
+      client.contactPerson = {
+        name: '',
+        email: '',
+        phone: ''
+      };
     }
 
-    if (name !== undefined) client.contactPerson.name = name;
-    if (email !== undefined) client.contactPerson.email = email;
-    if (phone !== undefined) client.contactPerson.phone = phone;
+    // Update contact person
+    client.contactPerson.name = name.trim();
+    client.contactPerson.email = email.trim();
+    if (phone !== undefined) client.contactPerson.phone = phone?.trim() || '';
 
+    // Save client
     await client.save();
+    console.log('✅ Client saved successfully');
 
     // Populate and return updated data
     client = await Client.findById(client._id)
@@ -1493,13 +1613,43 @@ exports.updateProfile = async (req, res) => {
       }
     };
 
+    console.log('====================================');
+    console.log('✅ PROFILE UPDATE SUCCESSFUL');
+    console.log('====================================');
+
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
       data: profileData
     });
   } catch (error) {
-    console.error('Update client profile error:', error);
+    console.error('====================================');
+    console.error('❌ UPDATE PROFILE ERROR');
+    console.error('====================================');
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('====================================');
+    
+    // Check for specific errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Duplicate entry detected',
+        error: 'Email or other unique field already exists',
+        errors: ['This email is already registered']
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Failed to update profile',
@@ -1507,7 +1657,6 @@ exports.updateProfile = async (req, res) => {
     });
   }
 };
-
 // @desc    Update company information
 // @route   PUT /api/client/profile/company
 // @access  Private (Client only)
