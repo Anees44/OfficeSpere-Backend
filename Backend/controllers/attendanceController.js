@@ -1276,15 +1276,41 @@ exports.getAllAttendance = async (req, res) => {
 // @desc    Get daily attendance
 // @route   GET /api/admin/attendance/daily
 // @access  Private (Admin)
+// ==========================================
+// FIXED getDailyAttendance FUNCTION
+// Replace this in your attendanceController.js
+// ==========================================
+
+// @desc    Get daily attendance
+// @route   GET /api/admin/attendance/daily
+// @access  Private (Admin)
 exports.getDailyAttendance = async (req, res) => {
   try {
+    console.log('====================================');
+    console.log('📥 GET DAILY ATTENDANCE CALLED');
+    console.log('Query params:', req.query);
+    console.log('====================================');
+
     const { date } = req.query;
 
-    const targetDate = date ? new Date(date) : new Date();
-    targetDate.setHours(0, 0, 0, 0);
+    // ✅ FIX: Use the same date calculation as checkIn
+    const queryDate = date ? new Date(date) : new Date();
+    const year = queryDate.getFullYear();
+    const month = queryDate.getMonth();
+    const day = queryDate.getDate();
+    const startOfDay = new Date(year, month, day, 0, 0, 0, 0);
+    const endOfDay = new Date(year, month, day, 23, 59, 59, 999);
 
+    console.log('📅 Query date (local):', startOfDay);
+    console.log('📅 End of day (local):', endOfDay);
+    console.log('📅 Original date param:', date);
+
+    // ✅ Query using date range instead of exact match
     const attendance = await Attendance.find({
-      date: targetDate
+      date: {
+        $gte: startOfDay,
+        $lte: endOfDay
+      }
     })
       .populate({
         path: 'employeeId',
@@ -1295,9 +1321,13 @@ exports.getDailyAttendance = async (req, res) => {
       })
       .sort({ checkInTime: 1 });
 
-    // Get all employees to find who hasn't checked in
-    const allEmployees = await Employee.find()
+    console.log('✅ Attendance records found:', attendance.length);
+
+    // Get all active employees
+    const allEmployees = await Employee.find({ isActive: true })
       .populate('userId', 'name email');
+
+    console.log('👥 Total active employees:', allEmployees.length);
 
     const checkedInEmployeeIds = attendance.map(a => a.employeeId._id.toString());
 
@@ -1305,20 +1335,66 @@ exports.getDailyAttendance = async (req, res) => {
       !checkedInEmployeeIds.includes(emp._id.toString())
     );
 
+    // ✅ Format attendance data for frontend
+    const formattedAttendance = attendance.map(record => ({
+      _id: record._id,
+      employeeName: record.employeeId?.userId?.name || record.employeeId?.name || 'Unknown',
+      email: record.employeeId?.userId?.email || 'N/A',
+      checkIn: record.checkInTime,
+      checkInTime: record.checkInTime,
+      checkOut: record.checkOutTime,
+      checkOutTime: record.checkOutTime,
+      workHours: record.workHours || 0,
+      totalHours: record.workHours || 0,
+      status: record.status,
+      employee: {
+        name: record.employeeId?.userId?.name || 'Unknown',
+        email: record.employeeId?.userId?.email || 'N/A'
+      }
+    }));
+
+    // ✅ Add absent employees to the list
+    const absentRecords = notCheckedIn.map(emp => ({
+      _id: null,
+      employeeName: emp.userId?.name || emp.name || 'Unknown',
+      email: emp.userId?.email || 'N/A',
+      checkIn: null,
+      checkInTime: null,
+      checkOut: null,
+      checkOutTime: null,
+      workHours: 0,
+      totalHours: 0,
+      status: 'absent',
+      employee: {
+        name: emp.userId?.name || emp.name || 'Unknown',
+        email: emp.userId?.email || 'N/A'
+      }
+    }));
+
+    const allRecords = [...formattedAttendance, ...absentRecords];
+
+    const stats = {
+      total: allEmployees.length,
+      present: attendance.filter(a => a.status === 'present' || a.status === 'Present').length,
+      late: attendance.filter(a => a.isLate || a.status === 'late' || a.status === 'Late').length,
+      absent: notCheckedIn.length
+    };
+
+    console.log('📊 Stats:', stats);
+    console.log('====================================');
+    console.log('✅ Sending response with', allRecords.length, 'records');
+    console.log('====================================');
+
     res.status(200).json({
       success: true,
-      data: {
-        date: targetDate,
-        present: attendance.filter(a => a.status === 'present').length,
-        late: attendance.filter(a => a.isLate).length,
-        absent: notCheckedIn.length,
-        attendance,
-        notCheckedIn
-      }
+      stats: stats,
+      attendance: allRecords
     });
 
   } catch (error) {
-    console.error('Get daily attendance error:', error);
+    console.error('====================================');
+    console.error('❌ Get daily attendance error:', error);
+    console.error('====================================');
     res.status(500).json({
       success: false,
       message: 'Server error',
