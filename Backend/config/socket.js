@@ -10,19 +10,26 @@ const initializeSocket = (server) => {
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       credentials: true
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'] // Important for compatibility
   });
 
   io.on('connection', (socket) => {
-    console.log('✅ User connected:', socket.id);
+    console.log('✅ Socket connected:', socket.id);
 
     // User joins their specific room
     socket.on('join-room', ({ role, userId }) => {
       const roomName = `${role}-${userId}`;
       socket.join(roomName);
-      socket.join(role); // Also join general role room (all admins, all employees, etc.)
+      socket.join(role); // Also join general role room
       
       console.log(`👤 User ${userId} joined rooms: ${roomName}, ${role}`);
+      
+      // Send confirmation
+      socket.emit('room-joined', { 
+        room: roomName, 
+        role,
+        message: 'Successfully joined room' 
+      });
     });
 
     // Leave room
@@ -33,18 +40,31 @@ const initializeSocket = (server) => {
       console.log(`👋 User ${userId} left room: ${roomName}`);
     });
 
+    // Handle ping/pong for connection health
+    socket.on('ping', () => {
+      socket.emit('pong');
+    });
+
     // Disconnect
-    socket.on('disconnect', () => {
-      console.log('❌ User disconnected:', socket.id);
+    socket.on('disconnect', (reason) => {
+      console.log(`❌ Socket disconnected: ${socket.id}, Reason: ${reason}`);
+    });
+
+    // Error handling
+    socket.on('error', (error) => {
+      console.error('❌ Socket error:', error);
     });
   });
+
+  // Log successful initialization
+  console.log('✅ Socket.IO initialized successfully');
 
   return io;
 };
 
 const getIO = () => {
   if (!io) {
-    throw new Error('Socket.io not initialized');
+    throw new Error('Socket.io not initialized! Call initializeSocket first.');
   }
   return io;
 };

@@ -37,7 +37,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
 }));
 
@@ -60,11 +60,11 @@ if (process.env.NODE_ENV === 'development') {
 const adminRoutes = require('./Routes/adminRoutes');
 const attendanceRoutes = require('./Routes/attendanceRoutes');
 const authRoutes = require('./Routes/authRoutes');
-const clientRoutes = require('./routes/clientRoutes');
+const clientRoutes = require('./Routes/clientRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
 const meetingRoutes = require('./routes/meetingRoutes');
 const reportRoutes = require('./routes/reportRoutes');
-const taskRoutes = require('./routes/taskRoutes');
+const taskRoutes = require('./Routes/taskRoutes');
 
 // Check if uploadRoutes exists
 let uploadRoutes;

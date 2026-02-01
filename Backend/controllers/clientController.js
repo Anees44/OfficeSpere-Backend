@@ -4,6 +4,10 @@ const Client = require('../models/Client');
 const Project = require('../models/Project');
 const Meeting = require('../models/Meeting');
 const DailyReport = require('../models/DailyReport');
+const {
+  notifyClientRegistered,
+  notifyClientFeedback
+} = require('../utils/Notificationhelper');
 
 // @desc    Get client dashboard data
 // @route   GET /api/client/dashboard

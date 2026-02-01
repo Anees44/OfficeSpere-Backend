@@ -120,7 +120,8 @@ exports.createTask = async (req, res) => {
       priority,
       status,
       dueDate,
-      estimatedHours
+      estimatedHours,
+      attachments
     } = req.body;
 
     // Verify project exists (if provided)
@@ -159,8 +160,9 @@ exports.createTask = async (req, res) => {
       status: status || 'pending',
       dueDate,
       estimatedHours: estimatedHours || 0,
-      assignedBy: req.user.id, // ✅ Admin who created the task
-      createdBy: req.user.id    // ✅ Admin who created the task
+      assignedBy: req.user.id,
+      createdBy: req.user.id,
+      attachments: attachments || []
     };
 
     // Only add project if provided
@@ -174,6 +176,37 @@ exports.createTask = async (req, res) => {
     await task.populate('project', 'name');
     await task.populate('assignedTo', 'name email');
     await task.populate('createdBy', 'name email');
+
+    // ✅ EMIT SOCKET EVENT
+    try {
+      const io = getIO();
+      
+      // Notify assigned employee
+      if (task.assignedTo) {
+        io.to(`employee-${task.assignedTo._id}`).emit('task-assigned', {
+          task: {
+            _id: task._id,
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            dueDate: task.dueDate,
+            status: task.status
+          },
+          assignedBy: req.user.name || 'Admin'
+        });
+      }
+      
+      // Notify all admins
+      io.to('admin').emit('task-created', {
+        task,
+        employeeId: task.assignedTo?._id,
+        employeeName: task.assignedTo?.name
+      });
+      
+      console.log('📡 Task assigned event emitted');
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError);
+    }
 
     res.status(201).json({
       success: true,
@@ -212,7 +245,8 @@ exports.updateTask = async (req, res) => {
       'status',
       'dueDate',
       'estimatedHours',
-      'assignedTo'
+      'assignedTo',
+      'attachments'
     ];
 
     allowedFields.forEach(field => {
@@ -236,6 +270,21 @@ exports.updateTask = async (req, res) => {
     await task.populate('project', 'name');
     await task.populate('assignedTo', 'name email');
     await task.populate('createdBy', 'name email');
+
+    // ✅ EMIT SOCKET EVENT
+    try {
+      const io = getIO();
+      io.to('admin').emit('task-updated', {
+        taskId: task._id,
+        title: task.title,
+        status: task.status,
+        employeeName: task.assignedTo?.name,
+        employeeId: task.assignedTo?._id
+      });
+      console.log('📡 Task update event emitted to admins');
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError);
+    }
 
     res.status(200).json({
       success: true,
@@ -541,87 +590,66 @@ exports.getTasksByEmployee = async (req, res) => {
   }
 };
 
-exports.createTask = async (req, res) => {
+// ============================================
+// EMPLOYEE TASK FUNCTIONS
+// ============================================
+
+// @desc    Get my tasks (for logged-in employee)
+// @route   GET /api/tasks/employee/my-tasks
+// @access  Private/Employee
+exports.getMyTasks = async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      project,
-      assignedTo,
-      priority,
-      dueDate,
-      estimatedHours
-    } = req.body;
+    const { status, priority } = req.query;
 
-    // ... your existing validation code ...
-
-    // Create task
-    const task = await Task.create({
-      title,
-      description,
-      project,
-      assignedTo,
-      priority: priority || 'medium',
-      status: 'pending',
-      dueDate,
-      estimatedHours,
-      createdBy: req.user.id
-    });
-
-    // Populate task data
-    await task.populate('project', 'name');
-    await task.populate('assignedTo', 'name email');
-    await task.populate('createdBy', 'name email');
-
-    // ✅ EMIT SOCKET EVENT
-    try {
-      const io = getIO();
-      
-      // Notify assigned employee
-      if (task.assignedTo) {
-        io.to(`employee-${task.assignedTo._id}`).emit('task-assigned', {
-          task: {
-            _id: task._id,
-            title: task.title,
-            description: task.description,
-            priority: task.priority,
-            dueDate: task.dueDate,
-            status: task.status
-          },
-          assignedBy: req.user.name || 'Admin'
-        });
-      }
-      
-      // Notify all admins
-      io.to('admin').emit('task-created', {
-        task,
-        employeeId: task.assignedTo?._id,
-        employeeName: task.assignedTo?.name
+    // Find employee by userId
+    const employee = await Employee.findOne({ userId: req.user.id });
+    
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee profile not found'
       });
-      
-      console.log('📡 Task assigned event emitted');
-    } catch (socketError) {
-      console.error('Socket emit error:', socketError);
     }
 
-    res.status(201).json({
+    // Build query
+    let query = { assignedTo: employee._id };
+
+    if (status && status !== 'all') {
+      query.status = status;
+    }
+
+    if (priority && priority !== 'all') {
+      query.priority = priority;
+    }
+
+    const tasks = await Task.find(query)
+      .populate('project', 'name status')
+      .populate('createdBy', 'name')
+      .sort({ dueDate: 1 });
+
+    res.status(200).json({
       success: true,
-      message: 'Task created successfully',
-      data: task
+      tasks: tasks
     });
   } catch (error) {
-    console.error('Create task error:', error);
+    console.error('Get my tasks error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error creating task',
+      message: 'Error fetching tasks',
       error: error.message
     });
   }
 };
 
-exports.updateTask = async (req, res) => {
+// @desc    Update task status (employee)
+// @route   PATCH /api/tasks/employee/:id/status
+// @access  Private/Employee
+exports.updateTaskStatus = async (req, res) => {
   try {
-    let task = await Task.findById(req.params.id);
+    const { status, attachments } = req.body;
+
+    const task = await Task.findById(req.params.id)
+      .populate('assignedTo', 'name email');
 
     if (!task) {
       return res.status(404).json({
@@ -630,64 +658,240 @@ exports.updateTask = async (req, res) => {
       });
     }
 
-    // Update fields
-    const allowedFields = [
-      'title',
-      'description',
-      'priority',
-      'status',
-      'dueDate',
-      'estimatedHours',
-      'assignedTo'
-    ];
+    // Find employee
+    const employee = await Employee.findOne({ userId: req.user.id });
+    
+    // Verify task is assigned to this employee
+    if (task.assignedTo._id.toString() !== employee._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this task'
+      });
+    }
 
-    allowedFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        task[field] = req.body[field];
-      }
-    });
+    // Update status
+    task.status = status;
 
-    // Update status timestamps
-    if (req.body.status === 'in-progress' && task.status !== 'in-progress') {
+    // Update timestamps
+    if (status === 'in-progress' && !task.startedAt) {
       task.startedAt = new Date();
     }
 
-    if (req.body.status === 'completed' && task.status !== 'completed') {
+    if (status === 'completed') {
       task.completedAt = new Date();
+      
+      // Add completion attachments if provided
+      if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+        task.attachments = [...(task.attachments || []), ...attachments];
+      }
+      
+      // Stop timer if running
+      if (task.timer.isRunning) {
+        task.stopTimer();
+      }
     }
 
     await task.save();
 
-    // Populate task data
-    await task.populate('project', 'name');
-    await task.populate('assignedTo', 'name email');
-    await task.populate('createdBy', 'name email');
-
-    // ✅ EMIT SOCKET EVENT
+    // ✅ EMIT SOCKET EVENT - Notify admin when task is completed
     try {
       const io = getIO();
-      io.to('admin').emit('task-updated', {
-        taskId: task._id,
-        title: task.title,
-        status: task.status,
-        employeeName: task.assignedTo?.name,
-        employeeId: task.assignedTo?._id
-      });
-      console.log('📡 Task update event emitted to admins');
+      
+      if (status === 'completed') {
+        io.to('admin').emit('task-completed', {
+          taskId: task._id,
+          title: task.title,
+          employeeName: task.assignedTo.name,
+          employeeId: task.assignedTo._id,
+          completedAt: task.completedAt,
+          actualHours: task.actualHours,
+          timeLogged: task.timer.totalTime,
+          attachments: task.attachments
+        });
+        console.log('📡 Task completion event emitted to admin');
+      } else {
+        io.to('admin').emit('task-status-updated', {
+          taskId: task._id,
+          title: task.title,
+          status: task.status,
+          employeeName: task.assignedTo.name,
+          employeeId: task.assignedTo._id
+        });
+      }
     } catch (socketError) {
       console.error('Socket emit error:', socketError);
     }
 
     res.status(200).json({
       success: true,
-      message: 'Task updated successfully',
+      message: 'Task status updated successfully',
       data: task
     });
   } catch (error) {
-    console.error('Update task error:', error);
+    console.error('Update task status error:', error);
     res.status(500).json({
       success: false,
-      message: 'Error updating task',
+      message: 'Error updating task status',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Start task timer
+// @route   POST /api/tasks/employee/:id/timer/start
+// @access  Private/Employee
+exports.startTaskTimer = async (req, res) => {
+  try {
+    const task = await Task.findById(req.params.id)
+      .populate('assignedTo', 'name email');
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    // Find employee
+    const employee = await Employee.findOne({ userId: req.user.id });
+    
+    // Verify task is assigned to this employee
+    if (task.assignedTo._id.toString() !== employee._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to start timer for this task'
+      });
+    }
+
+    // Check if timer is already running
+    if (task.timer.isRunning) {
+      return res.status(400).json({
+        success: false,
+        message: 'Timer is already running for this task'
+      });
+    }
+
+    // Start timer
+    task.timer.isRunning = true;
+    task.timer.startTime = new Date();
+
+    // Auto-update status to in-progress if pending
+    if (task.status === 'pending') {
+      task.status = 'in-progress';
+      task.startedAt = new Date();
+    }
+
+    await task.save();
+
+    // ✅ EMIT SOCKET EVENT - Notify admin when timer starts
+    try {
+      const io = getIO();
+      io.to('admin').emit('task-timer-started', {
+        taskId: task._id,
+        title: task.title,
+        employeeName: task.assignedTo.name,
+        employeeId: task.assignedTo._id,
+        startTime: task.timer.startTime,
+        status: task.status
+      });
+      console.log('📡 Task timer started event emitted to admin');
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Timer started successfully',
+      data: {
+        taskId: task._id,
+        timer: task.timer
+      }
+    });
+  } catch (error) {
+    console.error('Start task timer error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error starting timer',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Stop task timer
+// @route   POST /api/tasks/employee/:id/timer/stop
+// @access  Private/Employee
+exports.stopTaskTimer = async (req, res) => {
+  try {
+    const task = await Task.findById(req.params.id)
+      .populate('assignedTo', 'name email');
+
+    if (!task) {
+      return res.status(404).json({
+        success: false,
+        message: 'Task not found'
+      });
+    }
+
+    // Find employee
+    const employee = await Employee.findOne({ userId: req.user.id });
+    
+    // Verify task is assigned to this employee
+    if (task.assignedTo._id.toString() !== employee._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to stop timer for this task'
+      });
+    }
+
+    // Check if timer is running
+    if (!task.timer.isRunning) {
+      return res.status(400).json({
+        success: false,
+        message: 'Timer is not running for this task'
+      });
+    }
+
+    // Stop timer using the model method
+    task.stopTimer();
+    await task.save();
+
+    // Format time logged
+    const hours = Math.floor(task.timer.totalTime / 3600);
+    const minutes = Math.floor((task.timer.totalTime % 3600) / 60);
+    const timeLogged = `${hours}h ${minutes}m`;
+
+    // ✅ EMIT SOCKET EVENT - Notify admin when timer stops
+    try {
+      const io = getIO();
+      io.to('admin').emit('task-timer-stopped', {
+        taskId: task._id,
+        title: task.title,
+        employeeName: task.assignedTo.name,
+        employeeId: task.assignedTo._id,
+        timeLogged,
+        actualHours: task.actualHours,
+        totalTime: task.timer.totalTime
+      });
+      console.log('📡 Task timer stopped event emitted to admin');
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Timer stopped successfully',
+      data: {
+        taskId: task._id,
+        timeLogged,
+        actualHours: task.actualHours,
+        timer: task.timer
+      }
+    });
+  } catch (error) {
+    console.error('Stop task timer error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error stopping timer',
       error: error.message
     });
   }

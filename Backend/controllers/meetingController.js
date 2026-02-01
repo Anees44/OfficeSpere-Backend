@@ -5,6 +5,10 @@ const Employee = require('../models/Employee');
 const Client = require('../models/Client');
 const { sendEmail } = require('../utils/sendEmail');
 const { getIO } = require('../config/socket');
+const {
+  notifyMeetingScheduled,
+  notifyMeetingCancelled
+} = require('../utils/Notificationhelper.js');
 
 // @desc    Get all meetings (Admin)
 // @route   GET /api/admin/meetings
@@ -167,7 +171,16 @@ exports.scheduleMeeting = async (req, res) => {
       organizer: req.user.id,
       status: 'Scheduled'
     });
-
+    await notifyMeetingScheduled({
+      meetingId: meeting._id,
+      title: meeting.title,
+      date: new Date(meeting.date).toLocaleDateString(),
+      time: meeting.time,
+      organizer: req.user.name,
+      participants: meeting.participants.map(p => ({
+        id: p.participantId,
+        role: p.participantModel.toLowerCase()
+      }))})
     // Populate meeting
     const populatedMeeting = await Meeting.findById(meeting._id)
       .populate('organizer', 'name email')

@@ -557,7 +557,12 @@ exports.requestCorrection = async (req, res) => {
     const userId = req.user._id || req.user.id;
 
     const employee = await Employee.findOne({ userId: userId });
-
+    await notifyAttendanceCorrection({
+      employeeId: employee._id,
+      employeeName: employee.userId?.name,
+      date: new Date(date).toLocaleDateString(),
+      reason: reason
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -619,7 +624,14 @@ exports.requestLeave = async (req, res) => {
     const userId = req.user._id || req.user.id;
 
     const employee = await Employee.findOne({ userId: userId });
-
+     await notifyLeaveRequest({
+      employeeId: employee._id,
+      employeeName: employee.userId?.name,
+      leaveType: leaveType,
+      startDate: new Date(startDate).toLocaleDateString(),
+      endDate: new Date(endDate).toLocaleDateString(),
+      reason: reason
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,

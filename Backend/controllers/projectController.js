@@ -8,6 +8,11 @@ const Employee = require('../models/Employee');
 const Client = require('../models/Client');
 const Task = require('../models/Task');
 const { getIO } = require('../config/socket');
+const {
+  notifyProjectCreated,
+  notifyProjectUpdated,
+  notifyProjectCompleted
+} = require('../utils/Notificationhelper.js');
 
 // @desc    Get all projects
 // @route   GET /api/admin/projects
@@ -137,6 +142,15 @@ exports.createProject = async (req, res) => {
 
     // Verify client exists
     const clientExists = await Client.findById(client);
+    await notifyProjectCreated({
+      projectId: project._id,
+      name: project.name,
+      clientId: project.client?._id,
+      clientName: project.client?.companyName,
+      status: project.status,
+      startDate: project.startDate
+    });
+
     if (!clientExists) {
       return res.status(404).json({
         success: false,
@@ -204,7 +218,13 @@ exports.updateProject = async (req, res) => {
     console.log('📊 Update data:', req.body);
     
     let project = await Project.findById(req.params.id);
-
+    await notifyProjectUpdated({
+      projectId: project._id,
+      name: project.name,
+      clientId: project.client?._id,
+      status: project.status,
+      changes: Object.keys(req.body)
+    });
     if (!project) {
       console.log('❌ Project not found');
       return res.status(404).json({
@@ -521,7 +541,7 @@ exports.createProject = async (req, res) => {
       priority: priority || 'medium',
       createdBy: req.user.id
     });
-
+    
     // Populate project data
     await project.populate('client', 'name companyName email');
     await project.populate('team', 'name email department');
