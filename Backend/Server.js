@@ -59,7 +59,7 @@ if (process.env.NODE_ENV === 'development') {
 // Import routes
 const adminRoutes = require('./Routes/adminRoutes');
 const attendanceRoutes = require('./Routes/attendanceRoutes');
-const authRoutes = require('./routes/authRoutes');
+const authRoutes = require('./Routes/authRoutes');
 const clientRoutes = require('./routes/clientRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
 const meetingRoutes = require('./routes/meetingRoutes');

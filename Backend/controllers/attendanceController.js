@@ -124,6 +124,27 @@ exports.checkIn = async (req, res) => {
 
     console.log('✅ CHECK-IN SUCCESSFUL');
 
+    // ✅ CREATE NOTIFICATION FOR ADMIN
+    try {
+      const Notification = require('../models/Notification');
+      await Notification.create({
+        title: 'Employee Check-In',
+        message: `${employee.name} has checked in at ${new Date(checkInTime).toLocaleTimeString()}${isLate ? ' (Late)' : ''}`,
+        type: 'attendance',
+        role: 'admin',
+        isRead: false,
+        metadata: {
+          employeeId: employee._id,
+          employeeName: employee.name,
+          checkInTime: checkInTime,
+          isLate: isLate
+        }
+      });
+      console.log('📬 Notification created for admin');
+    } catch (notifError) {
+      console.error('⚠️ Notification creation error:', notifError);
+    }
+
     // Emit socket event
     try {
       const io = getIO();
@@ -246,6 +267,27 @@ exports.checkOut = async (req, res) => {
     await attendance.save();
 
     console.log('✅ Work hours calculated:', attendance.workHours);
+
+    // ✅ CREATE NOTIFICATION FOR ADMIN
+    try {
+      const Notification = require('../models/Notification');
+      await Notification.create({
+        title: 'Employee Check-Out',
+        message: `${employee.userId?.name || employee.name} has checked out. Work hours: ${attendance.workHours.toFixed(2)}h`,
+        type: 'attendance',
+        role: 'admin',
+        isRead: false,
+        metadata: {
+          employeeId: employee._id,
+          employeeName: employee.userId?.name || employee.name,
+          checkOutTime: checkOutTime,
+          workHours: attendance.workHours
+        }
+      });
+      console.log('📬 Check-out notification created for admin');
+    } catch (notifError) {
+      console.error('⚠️ Notification creation error:', notifError);
+    }
 
     // Emit socket event
     try {
