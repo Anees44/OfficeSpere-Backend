@@ -1,5 +1,4 @@
-// server.js
-// Main server file - OfficeSphere Backend (WITH SOCKET.IO)
+
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
@@ -21,15 +20,8 @@ const app = express();
 // CREATE HTTP SERVER
 const server = http.createServer(app);
 
-// INITIALIZE SOCKET.IO
-const io = initializeSocket(server);
 
-// MAKE IO ACCESSIBLE IN ROUTES
-app.set('io', io);
-
-// ==========================================
-// MIDDLEWARE
-// ==========================================
+initializeSocket(server);
 
 // Body parser middleware
 app.use(express.json());
