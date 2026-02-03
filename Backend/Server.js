@@ -62,7 +62,7 @@ const attendanceRoutes = require('./Routes/attendanceRoutes');
 const authRoutes = require('./Routes/authRoutes');
 const clientRoutes = require('./Routes/clientRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
-const meetingRoutes = require('./routes/meetingRoutes');
+const meetingRoutes = require('./Routes/meetingRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const taskRoutes = require('./Routes/taskRoutes');
 

@@ -1,4 +1,4 @@
-// controllers/meetingController.js
+// controllers/meetingController.js - CLEAN VERSION (No Duplicates)
 const Meeting = require('../models/Meeting');
 const User = require('../models/User');
 const Employee = require('../models/Employee');
@@ -18,19 +18,16 @@ exports.getAllMeetings = async (req, res) => {
     const { status, startDate, endDate, type } = req.query;
     let query = {};
 
-    // Filter by status
     if (status) {
       query.status = status;
     }
 
-    // Filter by date range
     if (startDate || endDate) {
       query.startTime = {};
       if (startDate) query.startTime.$gte = new Date(startDate);
       if (endDate) query.startTime.$lte = new Date(endDate);
     }
 
-    // Filter by type
     if (type) {
       query.type = type;
     }
@@ -74,7 +71,6 @@ exports.getMeeting = async (req, res) => {
       });
     }
 
-    // Check if user is authorized to view this meeting
     const isParticipant = meeting.participants.some(
       p => p.user._id.toString() === req.user.id
     );
@@ -105,6 +101,7 @@ exports.getMeeting = async (req, res) => {
 // @desc    Schedule new meeting (Admin)
 // @route   POST /api/admin/meetings
 // @access  Private/Admin
+// ✅ SINGLE COMPLETE VERSION - NO DUPLICATES
 exports.scheduleMeeting = async (req, res) => {
   try {
     const {
@@ -123,7 +120,14 @@ exports.scheduleMeeting = async (req, res) => {
       recurringPattern
     } = req.body;
 
-    // Validate required fields
+    console.log('====================================');
+    console.log('📅 SCHEDULE MEETING REQUEST');
+    console.log('====================================');
+    console.log('Title:', title);
+    console.log('Participants received:', participants);
+    console.log('====================================');
+
+    // ✅ Validate required fields
     if (!title || !startTime || !endTime || !duration || !type) {
       return res.status(400).json({
         success: false,
@@ -131,89 +135,149 @@ exports.scheduleMeeting = async (req, res) => {
       });
     }
 
-    // Validate participants exist
-    if (participants && participants.length > 0) {
-      const participantUsers = await User.find({
-        _id: { $in: participants }
+    if (!participants || participants.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please select at least one participant'
       });
-
-      if (participantUsers.length !== participants.length) {
-        return res.status(400).json({
-          success: false,
-          message: 'One or more participants not found'
-        });
-      }
     }
 
-    // Generate meeting ID
+    // ✅ Validate ALL participants (employees AND clients)
+    console.log('🔍 Validating participants...');
+    
+    const participantUsers = await User.find({
+      _id: { $in: participants }
+    }).select('_id name email role');
+
+    console.log(`✅ Found ${participantUsers.length} valid users out of ${participants.length} provided`);
+
+    if (participantUsers.length !== participants.length) {
+      const foundIds = participantUsers.map(u => u._id.toString());
+      const missingIds = participants.filter(id => !foundIds.includes(id.toString()));
+      
+      console.log('❌ Missing participants:', missingIds);
+      
+      return res.status(400).json({
+        success: false,
+        message: 'One or more participants not found',
+        details: {
+          expected: participants.length,
+          found: participantUsers.length,
+          missing: missingIds
+        }
+      });
+    }
+
+    // ✅ Generate meeting ID
     const meetingCount = await Meeting.countDocuments();
     const meetingId = `MTG${String(meetingCount + 1).padStart(5, '0')}`;
 
-    // Create meeting
+    console.log('📝 Creating meeting with ID:', meetingId);
+
+    // ✅ Create meeting
     const meeting = await Meeting.create({
       meetingId,
-      title,
-      description,
+      title: title.trim(),
+      description: description?.trim() || '',
       type,
-      startTime,
-      endTime,
-      duration,
+      startTime: new Date(startTime),
+      endTime: new Date(endTime),
+      duration: parseInt(duration),
       location: location || 'Office',
-      meetingLink,
-      participants: participants?.map(userId => ({
+      meetingLink: meetingLink?.trim() || '',
+      participants: participants.map(userId => ({
         user: userId,
-        status: 'Invited'
-      })) || [],
-      project,
-      agenda,
-      isRecurring,
-      recurringPattern,
+        status: 'Invited',
+        role: participantUsers.find(u => u._id.toString() === userId.toString())?.role || 'Participant'
+      })),
+      project: project || undefined,
+      agenda: agenda?.trim() || '',
+      isRecurring: isRecurring || false,
+      recurringPattern: recurringPattern || undefined,
       organizer: req.user.id,
       status: 'Scheduled'
     });
-    await notifyMeetingScheduled({
-      meetingId: meeting._id,
-      title: meeting.title,
-      date: new Date(meeting.date).toLocaleDateString(),
-      time: meeting.time,
-      organizer: req.user.name,
-      participants: meeting.participants.map(p => ({
-        id: p.participantId,
-        role: p.participantModel.toLowerCase()
-      }))})
-    // Populate meeting
+
+    console.log('✅ Meeting created with ID:', meeting._id);
+
+    // ✅ Populate meeting
     const populatedMeeting = await Meeting.findById(meeting._id)
       .populate('organizer', 'name email')
-      .populate('participants.user', 'name email')
+      .populate('participants.user', 'name email role')
       .populate('project', 'name');
 
-    // Send email notifications to participants
-    if (participants && participants.length > 0) {
-      const participantUsers = await User.find({
-        _id: { $in: participants }
-      });
+    console.log('✅ Meeting populated successfully');
 
-      for (const participant of participantUsers) {
-        try {
-          await sendEmail({
-            to: participant.email,
-            subject: `Meeting Scheduled: ${title}`,
-            html: `
-              <h2>You have been invited to a meeting</h2>
-              <p><strong>Title:</strong> ${title}</p>
-              <p><strong>Date:</strong> ${new Date(startTime).toLocaleString()}</p>
-              <p><strong>Duration:</strong> ${duration} minutes</p>
-              ${description ? `<p><strong>Description:</strong> ${description}</p>` : ''}
-              ${location ? `<p><strong>Location:</strong> ${location}</p>` : ''}
-              ${meetingLink ? `<p><strong>Link:</strong> <a href="${meetingLink}">${meetingLink}</a></p>` : ''}
-              <p>Please confirm your attendance.</p>
-            `
+    // ✅ Send notifications
+    try {
+      await notifyMeetingScheduled({
+        meetingId: meeting._id,
+        title: meeting.title,
+        date: new Date(meeting.startTime).toLocaleDateString(),
+        time: new Date(meeting.startTime).toLocaleTimeString(),
+        organizer: req.user.name,
+        participants: participants.map(id => ({
+          id: id,
+          role: participantUsers.find(u => u._id.toString() === id.toString())?.role || 'participant'
+        }))
+      });
+      console.log('✅ Notifications sent');
+    } catch (notifyError) {
+      console.error('⚠️  Notification error:', notifyError);
+    }
+
+    // ✅ Send socket events
+    try {
+      const io = getIO();
+      
+      if (participants && participants.length > 0) {
+        participants.forEach(participantId => {
+          io.to(`user-${participantId}`).emit('meeting-scheduled', {
+            meeting: {
+              _id: meeting._id,
+              title: meeting.title,
+              startTime: meeting.startTime,
+              duration: meeting.duration,
+              location: meeting.location,
+              meetingLink: meeting.meetingLink
+            }
           });
-        } catch (emailError) {
-          console.error('Email send error:', emailError);
-        }
+        });
+      }
+
+      io.to('admin').emit('meeting-scheduled', { meeting: populatedMeeting });
+      
+      console.log('📡 Socket events emitted');
+    } catch (socketError) {
+      console.error('⚠️  Socket emit error:', socketError);
+    }
+
+    // ✅ Send email notifications
+    for (const participant of participantUsers) {
+      try {
+        await sendEmail({
+          to: participant.email,
+          subject: `Meeting Scheduled: ${title}`,
+          html: `
+            <h2>You have been invited to a meeting</h2>
+            <p><strong>Title:</strong> ${title}</p>
+            <p><strong>Date:</strong> ${new Date(startTime).toLocaleString()}</p>
+            <p><strong>Duration:</strong> ${duration} minutes</p>
+            ${description ? `<p><strong>Description:</strong> ${description}</p>` : ''}
+            ${location ? `<p><strong>Location:</strong> ${location}</p>` : ''}
+            ${meetingLink ? `<p><strong>Link:</strong> <a href="${meetingLink}">${meetingLink}</a></p>` : ''}
+            <p>Please confirm your attendance.</p>
+          `
+        });
+        console.log(`📧 Email sent to ${participant.email}`);
+      } catch (emailError) {
+        console.error(`⚠️  Email error for ${participant.email}:`, emailError);
       }
     }
+
+    console.log('====================================');
+    console.log('✅ MEETING SCHEDULED SUCCESSFULLY');
+    console.log('====================================');
 
     res.status(201).json({
       success: true,
@@ -221,7 +285,13 @@ exports.scheduleMeeting = async (req, res) => {
       meeting: populatedMeeting
     });
   } catch (error) {
-    console.error('Schedule meeting error:', error);
+    console.error('====================================');
+    console.error('❌ SCHEDULE MEETING ERROR');
+    console.error('====================================');
+    console.error('Error:', error);
+    console.error('Error message:', error.message);
+    console.error('====================================');
+    
     res.status(500).json({
       success: false,
       message: 'Error scheduling meeting',
@@ -258,7 +328,6 @@ exports.updateMeeting = async (req, res) => {
       agenda
     } = req.body;
 
-    // Update fields
     if (title) meeting.title = title;
     if (description) meeting.description = description;
     if (type) meeting.type = type;
@@ -270,7 +339,6 @@ exports.updateMeeting = async (req, res) => {
     if (status) meeting.status = status;
     if (agenda) meeting.agenda = agenda;
 
-    // Update participants if provided
     if (participants && participants.length > 0) {
       meeting.participants = participants.map(userId => ({
         user: userId,
@@ -285,7 +353,6 @@ exports.updateMeeting = async (req, res) => {
       .populate('participants.user', 'name email')
       .populate('project', 'name');
 
-    // Send update notifications
     const participantUsers = await User.find({
       _id: { $in: meeting.participants.map(p => p.user) }
     });
@@ -337,14 +404,12 @@ exports.deleteMeeting = async (req, res) => {
       });
     }
 
-    // Get participants before deleting
     const participantUsers = await User.find({
       _id: { $in: meeting.participants.map(p => p.user) }
     });
 
     await meeting.deleteOne();
 
-    // Send cancellation notifications
     for (const participant of participantUsers) {
       try {
         await sendEmail({
@@ -437,7 +502,7 @@ exports.updateParticipantStatus = async (req, res) => {
       });
     }
 
-    const { status } = req.body; // 'Accepted', 'Declined', 'Tentative'
+    const { status } = req.body;
 
     if (!['Accepted', 'Declined', 'Tentative'].includes(status)) {
       return res.status(400).json({
@@ -489,12 +554,10 @@ exports.getMyMeetings = async (req, res) => {
       ]
     };
 
-    // Filter by status
     if (status) {
       query.status = status;
     }
 
-    // Get only upcoming meetings
     if (upcoming === 'true') {
       query.startTime = { $gte: new Date() };
     }
@@ -505,15 +568,14 @@ exports.getMyMeetings = async (req, res) => {
       .populate('project', 'name')
       .sort({ startTime: 1 });
 
-    // Transform to match frontend expectations
     const transformedMeetings = meetings.map(meeting => ({
       _id: meeting._id,
       meetingId: meeting.meetingId,
       title: meeting.title,
       description: meeting.description,
-      dateTime: meeting.startTime, // ✅ Frontend expects dateTime
+      dateTime: meeting.startTime,
       duration: meeting.duration,
-      meetingType: meeting.location === 'Online' ? 'online' : 'in-person', // ✅ Map to frontend format
+      meetingType: meeting.location === 'Online' ? 'online' : 'in-person',
       location: meeting.location,
       meetingLink: meeting.meetingLink,
       status: meeting.status,
@@ -546,9 +608,9 @@ exports.clientScheduleMeeting = async (req, res) => {
     const { 
       title, 
       description, 
-      dateTime,        // ✅ Frontend sends dateTime
+      dateTime,
       duration, 
-      meetingType,     // ✅ Frontend sends meetingType (online/in-person)
+      meetingType,
       location, 
       meetingLink, 
       projectId 
@@ -556,7 +618,6 @@ exports.clientScheduleMeeting = async (req, res) => {
 
     console.log('📥 Client meeting request:', req.body);
 
-    // ✅ Validate required fields
     if (!title || !dateTime || !duration) {
       return res.status(400).json({
         success: false,
@@ -564,11 +625,9 @@ exports.clientScheduleMeeting = async (req, res) => {
       });
     }
 
-    // ✅ Parse dateTime and calculate endTime
     const startTime = new Date(dateTime);
-    const endTime = new Date(startTime.getTime() + duration * 60000); // duration in minutes
+    const endTime = new Date(startTime.getTime() + duration * 60000);
 
-    // ✅ Validate date is in future
     if (startTime < new Date()) {
       return res.status(400).json({
         success: false,
@@ -576,14 +635,11 @@ exports.clientScheduleMeeting = async (req, res) => {
       });
     }
 
-    // ✅ Generate unique meeting ID
     const meetingCount = await Meeting.countDocuments();
     const meetingId = `MTG${String(meetingCount + 1).padStart(5, '0')}`;
 
-    // ✅ Map meetingType to location enum
     const mappedLocation = meetingType === 'online' ? 'Online' : 'Office';
 
-    // ✅ Validate in-person meetings have location
     if (meetingType === 'in-person' && (!location || !location.trim())) {
       return res.status(400).json({
         success: false,
@@ -591,17 +647,16 @@ exports.clientScheduleMeeting = async (req, res) => {
       });
     }
 
-    // ✅ Create meeting matching the Meeting model schema
     const meeting = await Meeting.create({
       meetingId,
       title: title.trim(),
       description: description?.trim() || '',
-      type: 'Client',              // ✅ Required by model
+      type: 'Client',
       organizer: req.user.id,
-      startTime,                   // ✅ Required by model
-      endTime,                     // ✅ Required by model
+      startTime,
+      endTime,
       duration: parseInt(duration),
-      location: mappedLocation,    // ✅ Required enum value
+      location: mappedLocation,
       meetingLink: meetingLink?.trim() || '',
       agenda: description?.trim() || '',
       project: projectId || undefined,
@@ -613,7 +668,6 @@ exports.clientScheduleMeeting = async (req, res) => {
       status: 'Scheduled'
     });
 
-    // ✅ Populate meeting data
     const populatedMeeting = await Meeting.findById(meeting._id)
       .populate('organizer', 'name email')
       .populate('participants.user', 'name email')
@@ -621,7 +675,6 @@ exports.clientScheduleMeeting = async (req, res) => {
 
     console.log('✅ Meeting created:', populatedMeeting);
 
-    // Transform to match frontend expectations
     const transformedMeeting = {
       _id: populatedMeeting._id,
       meetingId: populatedMeeting.meetingId,
@@ -668,7 +721,6 @@ exports.clientCancelMeeting = async (req, res) => {
       });
     }
 
-    // Check if client is the organizer
     if (meeting.organizer.toString() !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -692,81 +744,5 @@ exports.clientCancelMeeting = async (req, res) => {
     });
   }
 };
-exports.scheduleMeeting = async (req, res) => {
-  try {
-    // ... your existing code for creating meeting ...
-
-    const meeting = await Meeting.create({
-      meetingId,
-      title,
-      description,
-      type,
-      startTime,
-      endTime,
-      duration,
-      location: location || 'Office',
-      meetingLink,
-      participants: participants?.map(userId => ({
-        user: userId,
-        status: 'Invited'
-      })) || [],
-      project,
-      agenda,
-      isRecurring,
-      recurringPattern,
-      organizer: req.user.id,
-      status: 'Scheduled'
-    });
-
-    // Populate meeting
-    const populatedMeeting = await Meeting.findById(meeting._id)
-      .populate('organizer', 'name email')
-      .populate('participants.user', 'name email')
-      .populate('project', 'name');
-
-    // ✅ EMIT SOCKET EVENTS
-    try {
-      const io = getIO();
-      
-      if (participants && participants.length > 0) {
-        participants.forEach(participantId => {
-          io.to(`employee-${participantId}`).emit('meeting-scheduled', {
-            meeting: {
-              _id: meeting._id,
-              title: meeting.title,
-              startTime: meeting.startTime,
-              duration: meeting.duration,
-              location: meeting.location,
-              meetingLink: meeting.meetingLink
-            }
-          });
-        });
-      }
-
-      // Notify admins
-      io.to('admin').emit('meeting-scheduled', { meeting: populatedMeeting });
-      
-      console.log('📡 Meeting scheduled events emitted');
-    } catch (socketError) {
-      console.error('Socket emit error:', socketError);
-    }
-
-    // ... rest of your email code ...
-
-    res.status(201).json({
-      success: true,
-      message: 'Meeting scheduled successfully',
-      meeting: populatedMeeting
-    });
-  } catch (error) {
-    console.error('Schedule meeting error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error scheduling meeting',
-      error: error.message
-    });
-  }
-};
-
 
 module.exports = exports;

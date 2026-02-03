@@ -1,5 +1,5 @@
 // ============================================
-// Admin Controller
+// Admin Controller - COMPLETE FIXED VERSION
 // Handles all admin-related operations
 // ============================================
 
@@ -11,7 +11,7 @@ const Task = require("../models/Task");
 const Attendance = require("../models/Attendance");
 const Meeting = require("../models/Meeting");
 const DailyReport = require("../models/DailyReport");
-const Admin = require('../models/Admin'); // ✅ ADD THIS
+const Admin = require('../models/Admin');
 const { getIO } = require('../config/socket');
 
 // ============================================
@@ -549,8 +549,13 @@ const deleteEmployee = async (req, res) => {
 // CLIENT MANAGEMENT
 // ============================================
 
+// ✅✅✅ FIXED VERSION - Returns clients with userId field
 const getClients = async (req, res) => {
   try {
+    console.log('====================================');
+    console.log('📋 FETCHING ALL CLIENTS FOR ADMIN');
+    console.log('====================================');
+
     const { search, status, page = 1, limit = 10 } = req.query;
 
     let query = {};
@@ -570,22 +575,70 @@ const getClients = async (req, res) => {
     const skip = (page - 1) * limit;
     const total = await Client.countDocuments(query);
 
+    // ✅ Fetch clients with userId populated
     const clients = await Client.find(query)
-      .populate("userId", "email role")
+      .populate("userId", "name email phone role")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
+    console.log(`✅ Found ${clients.length} clients from database`);
+
+    // ✅✅✅ CRITICAL: Transform data to include userId
+    const transformedClients = clients.map(client => {
+      const userData = client.userId || {};
+
+      // ✅ This userId._id is what we need for meeting participants!
+      const userId = userData._id;
+
+      if (!userId) {
+        console.warn(`⚠️  Client ${client.clientId} has no userId!`);
+      }
+
+      return {
+        _id: client._id,
+        clientId: client.clientId,
+        userId: userId,  // ✅✅✅ CRITICAL: This is the User ObjectId for meetings!
+        name: userData.name || client.contactPerson?.name || 'Unknown',
+        email: userData.email || client.contactPerson?.email || client.companyEmail || '',
+        phone: userData.phone || client.contactPerson?.phone || '',
+        role: 'client',
+        company: client.companyName || '',
+        companyName: client.companyName || '',
+        industry: client.industry || '',
+        companySize: client.companySize || '',
+        website: client.companyWebsite || '',
+        isActive: client.isActive !== undefined ? client.isActive : true,
+        createdAt: client.createdAt,
+        updatedAt: client.updatedAt
+      };
+    });
+
+    console.log('====================================');
+    console.log('✅ Sample transformed client:');
+    if (transformedClients.length > 0) {
+      console.log(JSON.stringify(transformedClients[0], null, 2));
+    }
+    console.log('====================================');
+
+    // ✅✅✅ CRITICAL: Return with "clients" key (frontend expects this!)
     res.status(200).json({
       success: true,
-      count: clients.length,
+      count: transformedClients.length,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit),
-      data: clients,
+      clients: transformedClients,  // ✅ Frontend expects this key!
     });
+
   } catch (error) {
+    console.error('====================================');
+    console.error('❌ GET CLIENTS ERROR');
+    console.error('====================================');
     console.error("Get clients error:", error);
+    console.error('====================================');
+    
     res.status(500).json({
       success: false,
       message: "Error fetching clients",
@@ -706,6 +759,7 @@ const addClient = async (req, res) => {
 
     const responseData = {
       _id: populatedClient._id,
+      userId: populatedClient.userId?._id,  // ✅ Include userId in response
       name: populatedClient.userId?.name || name,
       email: populatedClient.userId?.email || email,
       phone: populatedClient.userId?.phone || phone,
@@ -858,7 +912,7 @@ const getSettings = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: settings, // ✅ This is correct
+      data: settings,
       message: 'Settings fetched successfully'
     });
 
@@ -874,6 +928,7 @@ const getSettings = async (req, res) => {
     });
   }
 };
+
 const updateSettings = async (req, res) => {
   try {
     console.log('====================================');
@@ -884,7 +939,6 @@ const updateSettings = async (req, res) => {
 
     const { company, work, attendance, email } = req.body;
 
-    // Validate
     if (!company || !work || !attendance || !email) {
       console.log('❌ Missing required sections');
       return res.status(400).json({
@@ -893,7 +947,6 @@ const updateSettings = async (req, res) => {
       });
     }
 
-    // Find or create admin
     let admin = await Admin.findOne({ userId: req.user.id });
 
     if (!admin) {
@@ -905,7 +958,6 @@ const updateSettings = async (req, res) => {
       });
     }
 
-    // Update settings
     admin.companyInfo = {
       companyName: company.companyName,
       email: company.email,
@@ -946,13 +998,11 @@ const updateSettings = async (req, res) => {
       monthlyReports: email.monthlyReports,
     };
 
-    // Save to database
     await admin.save();
 
     console.log('✅ Settings saved to database successfully!');
     console.log('====================================');
 
-    // Get formatted settings to return
     const updatedSettings = admin.getFormattedSettings();
 
     res.status(200).json({
@@ -974,6 +1024,7 @@ const updateSettings = async (req, res) => {
     });
   }
 };
+
 // ============================================
 // PROJECTS
 // ============================================
@@ -1028,17 +1079,6 @@ const getProjects = async (req, res) => {
 // ATTENDANCE
 // ============================================
 
-// ============================================
-// Admin Controller - getDailyAttendance Function
-// ===========================================  
-
-// @desc    Get daily attendance for admin dashboard & attendance monitor
-// @route   GET /api/admin/attendance
-// @access  Private/Admin
-// ============================================
-// Admin Controller - FIXED getDailyAttendance
-// Fixes: Timezone issue + Status matching
-// ============================================
 // @desc    Get daily attendance for admin dashboard & attendance monitor
 // @route   GET /api/admin/attendance
 // @access  Private/Admin
@@ -1051,14 +1091,12 @@ const getDailyAttendance = async (req, res) => {
 
     const { date } = req.query;
 
-    // ✅ FIX: Handle timezone properly
+    // ✅ Handle timezone properly
     let queryDate;
     if (date) {
-      // Parse the date string and create a new Date in UTC
       const [year, month, day] = date.split('-').map(Number);
       queryDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
     } else {
-      // Use today's date in UTC
       const now = new Date();
       queryDate = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0));
     }
@@ -1068,7 +1106,6 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('📅 Query date (UTC):', queryDate.toISOString());
     console.log('📅 Next day (UTC):', nextDay.toISOString());
-    console.log('📅 Original date param:', date);
 
     // ✅ Get ALL active employees
     const allEmployees = await Employee.find({ isActive: true })
@@ -1090,17 +1127,6 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('✅ Attendance records found:', attendanceRecords.length);
 
-    // ✅ DEBUG: Log first attendance record
-    if (attendanceRecords.length > 0) {
-      console.log('📋 Sample attendance record:', {
-        employeeId: attendanceRecords[0].employeeId?._id,
-        status: attendanceRecords[0].status,
-        checkIn: attendanceRecords[0].checkInTime,
-        checkOut: attendanceRecords[0].checkOutTime,
-        date: attendanceRecords[0].date
-      });
-    }
-
     // ✅ Map all employees with their attendance status
     const attendanceData = allEmployees.map(employee => {
       const record = attendanceRecords.find(
@@ -1108,7 +1134,6 @@ const getDailyAttendance = async (req, res) => {
       );
 
       if (record) {
-        // ✅ Employee has attendance record
         const checkIn = record.checkInTime;
         const checkOut = record.checkOutTime;
         let workHours = 0;
@@ -1118,18 +1143,14 @@ const getDailyAttendance = async (req, res) => {
           workHours = (diff / (1000 * 60 * 60)).toFixed(1);
         }
 
-        // ✅ FIX: Normalize status to lowercase for comparison
         const normalizedStatus = (record.status || 'present').toLowerCase();
 
-        // ✅ Determine final status
         let finalStatus = normalizedStatus;
         if (checkIn && !checkOut) {
-          finalStatus = 'present'; // Still checked in
+          finalStatus = 'present';
         } else if (!checkIn && !checkOut) {
           finalStatus = 'absent';
         }
-
-        console.log(`✅ Employee ${employee.email}: status="${record.status}" → normalized="${normalizedStatus}" → final="${finalStatus}"`);
 
         return {
           _id: record._id,
@@ -1144,12 +1165,10 @@ const getDailyAttendance = async (req, res) => {
           checkOutTime: record.checkOutTime,
           workHours: workHours,
           totalHours: workHours ? `${workHours}h` : '-',
-          status: finalStatus, // ✅ Use normalized status
+          status: finalStatus,
           isLate: record.isLate || false,
-          rawStatus: record.status // ✅ Keep original for debugging
         };
       } else {
-        // ✅ Employee has NO attendance record
         return {
           _id: null,
           employeeName: employee.userId?.name || employee.name || 'Unknown',
@@ -1169,7 +1188,7 @@ const getDailyAttendance = async (req, res) => {
       }
     });
 
-    // ✅ Calculate statistics (case-insensitive)
+    // ✅ Calculate statistics
     const stats = {
       total: attendanceData.length,
       present: attendanceData.filter(a =>
@@ -1184,11 +1203,6 @@ const getDailyAttendance = async (req, res) => {
     };
 
     console.log('📊 Stats:', stats);
-    console.log('📋 Status breakdown:', attendanceData.map(a => ({
-      name: a.employeeName,
-      status: a.status,
-      hasCheckIn: !!a.checkIn
-    })));
 
     // ✅ Sort: Present first, then late, then absent
     const sortedData = attendanceData.sort((a, b) => {
@@ -1198,7 +1212,6 @@ const getDailyAttendance = async (req, res) => {
 
       if (aOrder !== bOrder) return aOrder - bOrder;
 
-      // Same status - sort by check-in time
       if (!a.checkIn) return 1;
       if (!b.checkIn) return -1;
       return new Date(a.checkIn) - new Date(b.checkIn);
@@ -1208,13 +1221,11 @@ const getDailyAttendance = async (req, res) => {
     console.log('✅ Sending response with', sortedData.length, 'records');
     console.log('====================================');
 
-    // ✅ Send response in multiple formats for compatibility
-    // ✅✅✅ CRITICAL FIX: Use SINGLE consistent structure
     res.status(200).json({
       success: true,
       date: queryDate,
       stats: stats,
-      attendance: sortedData,  // ← AttendanceMonitor looks for this
+      attendance: sortedData,
       message: 'Attendance data fetched successfully'
     });
 
@@ -1223,8 +1234,6 @@ const getDailyAttendance = async (req, res) => {
     console.error('❌ GET DAILY ATTENDANCE ERROR');
     console.error('====================================');
     console.error('Error:', error);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
     console.error('====================================');
 
     res.status(500).json({
@@ -1235,11 +1244,6 @@ const getDailyAttendance = async (req, res) => {
   }
 };
 
-
-
-module.exports = {
-  getDailyAttendance
-};
 // ============================================
 // EXPORTS
 // ============================================

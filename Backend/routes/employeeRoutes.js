@@ -3,7 +3,7 @@
 
 const express = require('express');
 const router = express.Router();
-
+const notificationController = require('../controllers/notificationController');
 // Import controllers
 const employeeController = require('../controllers/employeeController');
 const attendanceController = require('../controllers/attendanceController');
@@ -164,5 +164,13 @@ router.get('/meetings', employeeController.getMyMeetings);
 // @desc    Get single meeting details
 // @access  Private (Employee)
 router.get('/meetings/:id', employeeController.getMeeting);
+
+router.get('/notifications', notificationController.getEmployeeNotifications);
+router.patch('/notifications/:id/read', notificationController.markAsRead);
+router.patch('/notifications/:id/unread', notificationController.markAsUnread);
+router.patch('/notifications/mark-all-read', notificationController.markAllRead);
+router.delete('/notifications/:id', notificationController.deleteNotification);
+router.post('/notifications/delete-many', notificationController.deleteMany);
+router.get('/notifications/unread-count', notificationController.getUnreadCount);
 
 module.exports = router;

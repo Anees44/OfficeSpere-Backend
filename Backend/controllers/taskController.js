@@ -1,11 +1,12 @@
 // ============================================
-// Task Controller
+// Task Controller - FIXED VERSION WITH NOTIFICATIONS
 // Handles all task-related operations
 // ============================================
 
 const Task = require('../models/Task');
 const Project = require('../models/Project');
 const Employee = require('../models/Employee');
+const Notification = require('../models/Notification'); // ✅ ADDED
 const { getIO } = require('../config/socket');
 
 // @desc    Get all tasks
@@ -177,6 +178,30 @@ exports.createTask = async (req, res) => {
     await task.populate('assignedTo', 'name email');
     await task.populate('createdBy', 'name email');
 
+    // ✅✅✅ CREATE NOTIFICATION FOR EMPLOYEE ✅✅✅
+    try {
+      await Notification.create({
+        role: 'employee',
+        title: '📋 New Task Assigned',
+        message: `You have been assigned a new task: ${title}`,
+        type: 'info',
+        isRead: false,
+        link: `/employee/tasks`,
+        data: {
+          taskId: task._id,
+          taskTitle: title,
+          priority: priority || 'medium',
+          dueDate: dueDate,
+          assignedBy: req.user.name || 'Admin'
+        }
+      });
+      console.log('✅ Notification created for employee:', employeeExists.name);
+    } catch (notifError) {
+      console.error('❌ Error creating notification:', notifError);
+      // Don't fail the task creation if notification fails
+    }
+    // ✅✅✅ END OF NOTIFICATION CODE ✅✅✅
+
     // ✅ EMIT SOCKET EVENT
     try {
       const io = getIO();
@@ -271,6 +296,27 @@ exports.updateTask = async (req, res) => {
     await task.populate('assignedTo', 'name email');
     await task.populate('createdBy', 'name email');
 
+    // ✅✅✅ CREATE NOTIFICATION FOR EMPLOYEE WHEN TASK IS UPDATED ✅✅✅
+    try {
+      await Notification.create({
+        role: 'employee',
+        title: '🔄 Task Updated',
+        message: `Task "${task.title}" has been updated`,
+        type: 'info',
+        isRead: false,
+        link: `/employee/tasks`,
+        data: {
+          taskId: task._id,
+          taskTitle: task.title,
+          updatedBy: req.user.name || 'Admin'
+        }
+      });
+      console.log('✅ Task update notification created for employee');
+    } catch (notifError) {
+      console.error('❌ Error creating update notification:', notifError);
+    }
+    // ✅✅✅ END OF NOTIFICATION CODE ✅✅✅
+
     // ✅ EMIT SOCKET EVENT
     try {
       const io = getIO();
@@ -362,6 +408,26 @@ exports.assignTask = async (req, res) => {
 
     // Populate task data
     await task.populate('assignedTo', 'name email department');
+
+    // ✅✅✅ CREATE NOTIFICATION WHEN TASK IS RE-ASSIGNED ✅✅✅
+    try {
+      await Notification.create({
+        role: 'employee',
+        title: '📋 Task Assigned to You',
+        message: `Task "${task.title}" has been assigned to you`,
+        type: 'info',
+        isRead: false,
+        link: `/employee/tasks`,
+        data: {
+          taskId: task._id,
+          taskTitle: task.title
+        }
+      });
+      console.log('✅ Task assignment notification created');
+    } catch (notifError) {
+      console.error('❌ Error creating assignment notification:', notifError);
+    }
+    // ✅✅✅ END OF NOTIFICATION CODE ✅✅✅
 
     res.status(200).json({
       success: true,
