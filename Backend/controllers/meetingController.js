@@ -1,109 +1,256 @@
-// controllers/meetingController.js - CLEAN VERSION (No Duplicates)
+// controllers/meetingController.js
+// ✅ COMPLETE PROPER FIX - Handles both User IDs and Employee records
+
 const Meeting = require('../models/Meeting');
+const Notification = require('../models/Notification');
 const User = require('../models/User');
 const Employee = require('../models/Employee');
-const Client = require('../models/Client');
-const { sendEmail } = require('../utils/sendEmail');
 const { getIO } = require('../config/socket');
-const {
-  notifyMeetingScheduled,
-  notifyMeetingCancelled
-} = require('../utils/Notificationhelper.js');
 
-// @desc    Get all meetings (Admin)
-// @route   GET /api/admin/meetings
-// @access  Private/Admin
+// ============================================
+// HELPER - Get User ID from Employee or User
+// ============================================
+const getUserIdFromParticipant = async (participantId) => {
+  try {
+    // First check if it's a valid User ID
+    const user = await User.findById(participantId);
+    if (user) {
+      console.log(`✅ Found User directly: ${user.name}`);
+      return user._id;
+    }
+
+    // If not, check if it's an Employee ID and get their userId
+    const employee = await Employee.findById(participantId).populate('userId');
+    if (employee && employee.userId) {
+      console.log(`✅ Found Employee, using their userId: ${employee.name}`);
+      return employee.userId._id || employee.userId;
+    }
+
+    console.warn(`⚠️ No User or Employee found for ID: ${participantId}`);
+    return null;
+  } catch (error) {
+    console.error(`❌ Error resolving participant ${participantId}:`, error);
+    return null;
+  }
+};
+
+// ============================================
+// HELPER FUNCTION - Create Notifications
+// ============================================
+const createMeetingNotifications = async (meeting, notificationType = 'scheduled') => {
+  try {
+    console.log('====================================');
+    console.log('📬 Creating Meeting Notifications');
+    console.log('====================================');
+    console.log('Meeting ID:', meeting._id);
+    console.log('Meeting Title:', meeting.title);
+    console.log('Notification Type:', notificationType);
+    console.log('Organizer:', meeting.organizer);
+    console.log('Participants:', meeting.participants?.length || 0);
+
+    const usersToNotify = new Set();
+
+    // Add organizer
+    const organizerId = meeting.organizer?._id || meeting.organizer;
+    const organizerIdString = organizerId.toString();
+    usersToNotify.add(organizerIdString);
+    console.log('✅ Added organizer ID to notify list:', organizerIdString);
+
+    // Add participants
+    if (meeting.participants && meeting.participants.length > 0) {
+      for (const participant of meeting.participants) {
+        const userId = participant.user?._id || participant.user;
+        
+        if (userId) {
+          const userIdString = userId.toString();
+          usersToNotify.add(userIdString);
+          console.log('✅ Added participant user ID:', userIdString);
+        } else {
+          console.warn('⚠️ Participant has no user field:', participant);
+        }
+      }
+      console.log('✅ Processed participants:', meeting.participants.length);
+    }
+
+    console.log('📤 Total users to notify:', usersToNotify.size);
+    console.log('📤 User IDs:', Array.from(usersToNotify));
+
+    if (usersToNotify.size === 0) {
+      console.log('⚠️ No users to notify');
+      return;
+    }
+
+    // Get organizer info for message
+    const organizer = await User.findById(meeting.organizer).select('name email');
+    const organizerName = organizer?.name || 'Admin';
+
+    // Determine notification message based on type
+    let titlePrefix = '';
+    let messageAction = '';
+
+    switch (notificationType) {
+      case 'scheduled':
+        titlePrefix = '📅 New Meeting Scheduled';
+        messageAction = 'scheduled';
+        break;
+      case 'updated':
+        titlePrefix = '📝 Meeting Updated';
+        messageAction = 'updated';
+        break;
+      case 'cancelled':
+        titlePrefix = '❌ Meeting Cancelled';
+        messageAction = 'cancelled';
+        break;
+      case 'deleted':
+        titlePrefix = '🗑️ Meeting Deleted';
+        messageAction = 'deleted';
+        break;
+      default:
+        titlePrefix = '📅 Meeting Notification';
+        messageAction = 'updated';
+    }
+
+    // Format meeting time
+    const meetingDate = new Date(meeting.startTime).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+    const meetingTime = new Date(meeting.startTime).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    // Get Socket.IO instance
+    const io = getIO();
+
+    // Create notifications for ALL users
+    const notificationPromises = Array.from(usersToNotify).map(async (userId) => {
+      try {
+        console.log('📤 Processing user ID:', userId);
+
+        const user = await User.findById(userId).select('name email role');
+
+        if (!user) {
+          console.warn('⚠️ User not found for ID:', userId);
+          return null;
+        }
+
+        console.log(`📤 Creating notification for: ${user.name} (${user.role})`);
+
+        const notification = await Notification.create({
+          title: titlePrefix,
+          message: `${organizerName} has ${messageAction} a meeting "${meeting.title}" on ${meetingDate} at ${meetingTime}`,
+          type: 'meeting',
+          role: user.role,
+          metadata: {
+            meetingId: meeting._id,
+            meetingTitle: meeting.title,
+            organizerName: organizerName,
+            startTime: meeting.startTime,
+            location: meeting.location,
+            meetingLink: meeting.meetingLink
+          },
+          isRead: false
+        });
+
+        console.log(`✅ Notification created for ${user.name} (${user.role}):`, notification._id);
+
+        // Emit real-time notification via Socket.IO
+        if (io) {
+          const socketRoom = `${user.role}-${userId}`;
+
+          console.log('====================================');
+          console.log('📡 SOCKET EMISSION');
+          console.log('====================================');
+          console.log('User ID:', userId);
+          console.log('User Role:', user.role);
+          console.log('Socket Room:', socketRoom);
+          console.log('====================================');
+
+          io.to(socketRoom).emit('new-notification', {
+            _id: notification._id,
+            title: notification.title,
+            message: notification.message,
+            type: notification.type,
+            role: notification.role,
+            metadata: notification.metadata,
+            isRead: notification.isRead,
+            createdAt: notification.createdAt
+          });
+
+          console.log(`✅ Socket notification sent to ${socketRoom}`);
+        }
+
+        return notification;
+
+      } catch (error) {
+        console.error('❌ Error creating notification for user:', userId, error);
+        return null;
+      }
+    });
+
+    const notifications = await Promise.all(notificationPromises);
+    const successfulNotifications = notifications.filter(n => n !== null);
+
+    console.log(`✅ Created ${successfulNotifications.length} notifications`);
+    console.log('====================================');
+
+    return successfulNotifications;
+
+  } catch (error) {
+    console.error('❌ Error in createMeetingNotifications:', error);
+  }
+};
+
+// ============================================
+// ADMIN - Get All Meetings
+// ============================================
 exports.getAllMeetings = async (req, res) => {
   try {
-    const { status, startDate, endDate, type } = req.query;
-    let query = {};
+    console.log('🔍 Fetching all meetings for admin');
 
-    if (status) {
-      query.status = status;
-    }
-
-    if (startDate || endDate) {
-      query.startTime = {};
-      if (startDate) query.startTime.$gte = new Date(startDate);
-      if (endDate) query.startTime.$lte = new Date(endDate);
-    }
-
-    if (type) {
-      query.type = type;
-    }
-
-    const meetings = await Meeting.find(query)
+    const meetings = await Meeting.find()
       .populate('organizer', 'name email')
       .populate('participants.user', 'name email role')
       .populate('project', 'name')
       .sort({ startTime: -1 });
+
+    console.log(`✅ Found ${meetings.length} meetings`);
 
     res.status(200).json({
       success: true,
       count: meetings.length,
       meetings
     });
+
   } catch (error) {
-    console.error('Get all meetings error:', error);
+    console.error('❌ Error fetching meetings:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching meetings',
+      message: 'Failed to fetch meetings',
       error: error.message
     });
   }
 };
 
-// @desc    Get single meeting
-// @route   GET /api/admin/meetings/:id
-// @access  Private
-exports.getMeeting = async (req, res) => {
-  try {
-    const meeting = await Meeting.findById(req.params.id)
-      .populate('organizer', 'name email')
-      .populate('participants.user', 'name email role')
-      .populate('project', 'name client')
-      .populate('minutes.recordedBy', 'name email');
-
-    if (!meeting) {
-      return res.status(404).json({
-        success: false,
-        message: 'Meeting not found'
-      });
-    }
-
-    const isParticipant = meeting.participants.some(
-      p => p.user._id.toString() === req.user.id
-    );
-    const isOrganizer = meeting.organizer._id.toString() === req.user.id;
-    const isAdmin = req.user.role === 'admin';
-
-    if (!isParticipant && !isOrganizer && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to view this meeting'
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      meeting
-    });
-  } catch (error) {
-    console.error('Get meeting error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching meeting',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Schedule new meeting (Admin)
-// @route   POST /api/admin/meetings
-// @access  Private/Admin
-// ✅ SINGLE COMPLETE VERSION - NO DUPLICATES
+// ============================================
+// ADMIN - Schedule Meeting
+// ============================================
 exports.scheduleMeeting = async (req, res) => {
   try {
+    console.log('====================================');
+    console.log('📅 ADMIN SCHEDULE MEETING REQUEST');
+    console.log('====================================');
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    console.log('User (Admin):', {
+      id: req.user._id,
+      email: req.user.email,
+      role: req.user.role
+    });
+
     const {
       title,
       description,
@@ -115,23 +262,14 @@ exports.scheduleMeeting = async (req, res) => {
       meetingLink,
       participants,
       project,
-      agenda,
-      isRecurring,
-      recurringPattern
+      agenda
     } = req.body;
 
-    console.log('====================================');
-    console.log('📅 SCHEDULE MEETING REQUEST');
-    console.log('====================================');
-    console.log('Title:', title);
-    console.log('Participants received:', participants);
-    console.log('====================================');
-
-    // ✅ Validate required fields
-    if (!title || !startTime || !endTime || !duration || !type) {
+    // Validate required fields
+    if (!title || !startTime || !endTime || !type) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide title, start time, end time, duration, and type'
+        message: 'Please provide title, start time, end time, and meeting type'
       });
     }
 
@@ -142,141 +280,90 @@ exports.scheduleMeeting = async (req, res) => {
       });
     }
 
-    // ✅ Validate ALL participants (employees AND clients)
-    console.log('🔍 Validating participants...');
-    
-    const participantUsers = await User.find({
-      _id: { $in: participants }
-    }).select('_id name email role');
+    // ✅✅✅ CRITICAL FIX: Resolve participant IDs to actual User IDs
+    console.log('====================================');
+    console.log('🔍 RESOLVING PARTICIPANTS');
+    console.log('====================================');
+    console.log('Participant IDs received:', participants);
 
-    console.log(`✅ Found ${participantUsers.length} valid users out of ${participants.length} provided`);
+    const resolvedUserIds = [];
+    const failedParticipants = [];
 
-    if (participantUsers.length !== participants.length) {
-      const foundIds = participantUsers.map(u => u._id.toString());
-      const missingIds = participants.filter(id => !foundIds.includes(id.toString()));
-      
-      console.log('❌ Missing participants:', missingIds);
-      
+    for (const participantId of participants) {
+      const userId = await getUserIdFromParticipant(participantId);
+      if (userId) {
+        resolvedUserIds.push(userId);
+      } else {
+        failedParticipants.push(participantId);
+      }
+    }
+
+    console.log('✅ Resolved User IDs:', resolvedUserIds);
+
+    if (failedParticipants.length > 0) {
+      console.error('❌ Failed to resolve participants:', failedParticipants);
       return res.status(400).json({
         success: false,
-        message: 'One or more participants not found',
-        details: {
-          expected: participants.length,
-          found: participantUsers.length,
-          missing: missingIds
-        }
+        message: `Invalid participant IDs: ${failedParticipants.join(', ')}. These users do not exist.`
       });
     }
 
-    // ✅ Generate meeting ID
+    if (resolvedUserIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid participants found'
+      });
+    }
+
+    console.log('✅ All participants resolved successfully');
+    console.log('====================================');
+
+    // Generate meeting ID
     const meetingCount = await Meeting.countDocuments();
-    const meetingId = `MTG${String(meetingCount + 1).padStart(5, '0')}`;
+    const meetingId = `MTG${String(meetingCount + 1).padStart(4, '0')}`;
 
-    console.log('📝 Creating meeting with ID:', meetingId);
+    // Format participants array
+    const participantsList = resolvedUserIds.map(userId => ({
+      user: userId,
+      status: 'Invited'
+    }));
 
-    // ✅ Create meeting
+    console.log('📤 Participants list:', participantsList);
+
+    // Create meeting
     const meeting = await Meeting.create({
       meetingId,
-      title: title.trim(),
-      description: description?.trim() || '',
+      title,
+      description: description || '',
       type,
+      organizer: req.user._id,
+      participants: participantsList,
+      project: project || null,
       startTime: new Date(startTime),
       endTime: new Date(endTime),
-      duration: parseInt(duration),
+      duration: duration || 60,
       location: location || 'Office',
-      meetingLink: meetingLink?.trim() || '',
-      participants: participants.map(userId => ({
-        user: userId,
-        status: 'Invited',
-        role: participantUsers.find(u => u._id.toString() === userId.toString())?.role || 'Participant'
-      })),
-      project: project || undefined,
-      agenda: agenda?.trim() || '',
-      isRecurring: isRecurring || false,
-      recurringPattern: recurringPattern || undefined,
-      organizer: req.user.id,
+      meetingLink: meetingLink || '',
+      agenda: agenda || '',
       status: 'Scheduled'
     });
 
-    console.log('✅ Meeting created with ID:', meeting._id);
+    console.log('✅ Meeting created:', meeting._id);
 
-    // ✅ Populate meeting
+    // Populate meeting data
     const populatedMeeting = await Meeting.findById(meeting._id)
       .populate('organizer', 'name email')
       .populate('participants.user', 'name email role')
       .populate('project', 'name');
 
-    console.log('✅ Meeting populated successfully');
+    console.log('✅ Meeting populated');
 
-    // ✅ Send notifications
-    try {
-      await notifyMeetingScheduled({
-        meetingId: meeting._id,
-        title: meeting.title,
-        date: new Date(meeting.startTime).toLocaleDateString(),
-        time: new Date(meeting.startTime).toLocaleTimeString(),
-        organizer: req.user.name,
-        participants: participants.map(id => ({
-          id: id,
-          role: participantUsers.find(u => u._id.toString() === id.toString())?.role || 'participant'
-        }))
-      });
-      console.log('✅ Notifications sent');
-    } catch (notifyError) {
-      console.error('⚠️  Notification error:', notifyError);
-    }
-
-    // ✅ Send socket events
-    try {
-      const io = getIO();
-      
-      if (participants && participants.length > 0) {
-        participants.forEach(participantId => {
-          io.to(`user-${participantId}`).emit('meeting-scheduled', {
-            meeting: {
-              _id: meeting._id,
-              title: meeting.title,
-              startTime: meeting.startTime,
-              duration: meeting.duration,
-              location: meeting.location,
-              meetingLink: meeting.meetingLink
-            }
-          });
-        });
-      }
-
-      io.to('admin').emit('meeting-scheduled', { meeting: populatedMeeting });
-      
-      console.log('📡 Socket events emitted');
-    } catch (socketError) {
-      console.error('⚠️  Socket emit error:', socketError);
-    }
-
-    // ✅ Send email notifications
-    for (const participant of participantUsers) {
-      try {
-        await sendEmail({
-          to: participant.email,
-          subject: `Meeting Scheduled: ${title}`,
-          html: `
-            <h2>You have been invited to a meeting</h2>
-            <p><strong>Title:</strong> ${title}</p>
-            <p><strong>Date:</strong> ${new Date(startTime).toLocaleString()}</p>
-            <p><strong>Duration:</strong> ${duration} minutes</p>
-            ${description ? `<p><strong>Description:</strong> ${description}</p>` : ''}
-            ${location ? `<p><strong>Location:</strong> ${location}</p>` : ''}
-            ${meetingLink ? `<p><strong>Link:</strong> <a href="${meetingLink}">${meetingLink}</a></p>` : ''}
-            <p>Please confirm your attendance.</p>
-          `
-        });
-        console.log(`📧 Email sent to ${participant.email}`);
-      } catch (emailError) {
-        console.error(`⚠️  Email error for ${participant.email}:`, emailError);
-      }
-    }
+    // Create notifications
+    await createMeetingNotifications(populatedMeeting, 'scheduled');
 
     console.log('====================================');
     console.log('✅ MEETING SCHEDULED SUCCESSFULLY');
+    console.log('Meeting ID:', meeting.meetingId);
     console.log('====================================');
 
     res.status(201).json({
@@ -284,27 +371,62 @@ exports.scheduleMeeting = async (req, res) => {
       message: 'Meeting scheduled successfully',
       meeting: populatedMeeting
     });
+
   } catch (error) {
     console.error('====================================');
-    console.error('❌ SCHEDULE MEETING ERROR');
+    console.error('❌ ADMIN SCHEDULE MEETING ERROR');
     console.error('====================================');
     console.error('Error:', error);
-    console.error('Error message:', error.message);
-    console.error('====================================');
-    
+    console.error('Stack:', error.stack);
+
     res.status(500).json({
       success: false,
-      message: 'Error scheduling meeting',
+      message: 'Failed to schedule meeting',
       error: error.message
     });
   }
 };
 
-// @desc    Update meeting
-// @route   PUT /api/admin/meetings/:id
-// @access  Private/Admin
+// ============================================
+// ADMIN - Get Single Meeting
+// ============================================
+exports.getMeeting = async (req, res) => {
+  try {
+    const meeting = await Meeting.findById(req.params.id)
+      .populate('organizer', 'name email')
+      .populate('participants.user', 'name email role')
+      .populate('project', 'name');
+
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        message: 'Meeting not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      meeting
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching meeting:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch meeting',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// ADMIN - Update Meeting
+// ============================================
 exports.updateMeeting = async (req, res) => {
   try {
+    console.log('📝 Updating meeting:', req.params.id);
+    console.log('Update data:', req.body);
+
     let meeting = await Meeting.findById(req.params.id);
 
     if (!meeting) {
@@ -313,6 +435,231 @@ exports.updateMeeting = async (req, res) => {
         message: 'Meeting not found'
       });
     }
+
+    // Update meeting
+    meeting = await Meeting.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    )
+      .populate('organizer', 'name email')
+      .populate('participants.user', 'name email role')
+      .populate('project', 'name');
+
+    // Create notifications for updated meeting
+    await createMeetingNotifications(meeting, 'updated');
+
+    console.log('✅ Meeting updated successfully');
+
+    res.status(200).json({
+      success: true,
+      message: 'Meeting updated successfully',
+      meeting
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating meeting:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update meeting',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// ADMIN - Delete Meeting
+// ============================================
+exports.deleteMeeting = async (req, res) => {
+  try {
+    console.log('====================================');
+    console.log('🗑️ ADMIN DELETE MEETING REQUEST');
+    console.log('====================================');
+    console.log('Meeting ID:', req.params.id);
+
+    const meeting = await Meeting.findById(req.params.id)
+      .populate('organizer', 'name email role')
+      .populate('participants.user', 'name email role');
+
+    if (!meeting) {
+      console.log('❌ Meeting not found');
+      return res.status(404).json({
+        success: false,
+        message: 'Meeting not found'
+      });
+    }
+
+    console.log('📋 Meeting found:', meeting.title);
+
+    // Create deletion notifications BEFORE deleting
+    await createMeetingNotifications(meeting, 'deleted');
+
+    // Delete the meeting
+    await Meeting.findByIdAndDelete(req.params.id);
+
+    console.log('✅ Meeting deleted successfully');
+    console.log('====================================');
+
+    res.status(200).json({
+      success: true,
+      message: 'Meeting deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('====================================');
+    console.error('❌ DELETE MEETING ERROR');
+    console.error('====================================');
+    console.error('Error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete meeting',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// ADMIN - Add Meeting Minutes
+// ============================================
+exports.addMeetingMinutes = async (req, res) => {
+  try {
+    const { discussion, decisions, actionItems } = req.body;
+
+    const meeting = await Meeting.findByIdAndUpdate(
+      req.params.id,
+      {
+        minutes: {
+          discussion,
+          decisions,
+          actionItems,
+          recordedBy: req.user._id,
+          recordedAt: new Date()
+        }
+      },
+      { new: true }
+    )
+      .populate('organizer', 'name email')
+      .populate('participants.user', 'name email role')
+      .populate('project', 'name');
+
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        message: 'Meeting not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Meeting minutes added successfully',
+      meeting
+    });
+
+  } catch (error) {
+    console.error('❌ Error adding meeting minutes:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add meeting minutes',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// EMPLOYEE/CLIENT - Get My Meetings
+// ============================================
+exports.getMyMeetings = async (req, res) => {
+  try {
+    console.log(`🔍 Fetching meetings for ${req.user.role}:`, req.user.email);
+
+    const meetings = await Meeting.find({
+      'participants.user': req.user._id
+    })
+      .populate('organizer', 'name email')
+      .populate('participants.user', 'name email role')
+      .populate('project', 'name')
+      .sort({ startTime: -1 });
+
+    console.log(`✅ Found ${meetings.length} meetings for user`);
+
+    res.status(200).json({
+      success: true,
+      count: meetings.length,
+      meetings
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching my meetings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch meetings',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// EMPLOYEE/CLIENT - Update Participant Status
+// ============================================
+exports.updateParticipantStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    const meeting = await Meeting.findById(req.params.id);
+
+    if (!meeting) {
+      return res.status(404).json({
+        success: false,
+        message: 'Meeting not found'
+      });
+    }
+
+    // Find participant
+    const participantIndex = meeting.participants.findIndex(
+      p => p.user.toString() === req.user._id.toString()
+    );
+
+    if (participantIndex === -1) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not a participant in this meeting'
+      });
+    }
+
+    // Update status
+    meeting.participants[participantIndex].status = status;
+    await meeting.save();
+
+    const updatedMeeting = await Meeting.findById(meeting._id)
+      .populate('organizer', 'name email')
+      .populate('participants.user', 'name email role')
+      .populate('project', 'name');
+
+    res.status(200).json({
+      success: true,
+      message: 'Meeting status updated',
+      meeting: updatedMeeting
+    });
+
+  } catch (error) {
+    console.error('❌ Error updating participant status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update status',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// CLIENT - Schedule Meeting
+// ============================================
+exports.clientScheduleMeeting = async (req, res) => {
+  try {
+    console.log('====================================');
+    console.log('📅 CLIENT SCHEDULE MEETING REQUEST');
+    console.log('====================================');
 
     const {
       title,
@@ -324,395 +671,77 @@ exports.updateMeeting = async (req, res) => {
       location,
       meetingLink,
       participants,
-      status,
       agenda
     } = req.body;
 
-    if (title) meeting.title = title;
-    if (description) meeting.description = description;
-    if (type) meeting.type = type;
-    if (startTime) meeting.startTime = startTime;
-    if (endTime) meeting.endTime = endTime;
-    if (duration) meeting.duration = duration;
-    if (location) meeting.location = location;
-    if (meetingLink) meeting.meetingLink = meetingLink;
-    if (status) meeting.status = status;
-    if (agenda) meeting.agenda = agenda;
-
-    if (participants && participants.length > 0) {
-      meeting.participants = participants.map(userId => ({
-        user: userId,
-        status: 'Invited'
-      }));
-    }
-
-    await meeting.save();
-
-    const updatedMeeting = await Meeting.findById(meeting._id)
-      .populate('organizer', 'name email')
-      .populate('participants.user', 'name email')
-      .populate('project', 'name');
-
-    const participantUsers = await User.find({
-      _id: { $in: meeting.participants.map(p => p.user) }
-    });
-
-    for (const participant of participantUsers) {
-      try {
-        await sendEmail({
-          to: participant.email,
-          subject: `Meeting Updated: ${title}`,
-          html: `
-            <h2>Meeting details have been updated</h2>
-            <p><strong>Title:</strong> ${title}</p>
-            <p><strong>Date:</strong> ${new Date(startTime).toLocaleString()}</p>
-            <p><strong>Duration:</strong> ${duration} minutes</p>
-            <p>Please check the updated details in your dashboard.</p>
-          `
-        });
-      } catch (emailError) {
-        console.error('Email send error:', emailError);
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Meeting updated successfully',
-      meeting: updatedMeeting
-    });
-  } catch (error) {
-    console.error('Update meeting error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating meeting',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Delete meeting
-// @route   DELETE /api/admin/meetings/:id
-// @access  Private/Admin
-exports.deleteMeeting = async (req, res) => {
-  try {
-    const meeting = await Meeting.findById(req.params.id);
-
-    if (!meeting) {
-      return res.status(404).json({
-        success: false,
-        message: 'Meeting not found'
-      });
-    }
-
-    const participantUsers = await User.find({
-      _id: { $in: meeting.participants.map(p => p.user) }
-    });
-
-    await meeting.deleteOne();
-
-    for (const participant of participantUsers) {
-      try {
-        await sendEmail({
-          to: participant.email,
-          subject: `Meeting Cancelled: ${meeting.title}`,
-          html: `
-            <h2>Meeting has been cancelled</h2>
-            <p><strong>Title:</strong> ${meeting.title}</p>
-            <p><strong>Scheduled Date:</strong> ${new Date(meeting.startTime).toLocaleString()}</p>
-            <p>This meeting has been cancelled by the organizer.</p>
-          `
-        });
-      } catch (emailError) {
-        console.error('Email send error:', emailError);
-      }
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Meeting deleted successfully'
-    });
-  } catch (error) {
-    console.error('Delete meeting error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error deleting meeting',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Add meeting minutes/notes
-// @route   POST /api/admin/meetings/:id/minutes
-// @access  Private/Admin
-exports.addMeetingMinutes = async (req, res) => {
-  try {
-    const meeting = await Meeting.findById(req.params.id);
-
-    if (!meeting) {
-      return res.status(404).json({
-        success: false,
-        message: 'Meeting not found'
-      });
-    }
-
-    const { discussion, decisions, actionItems } = req.body;
-
-    meeting.minutes = {
-      discussion,
-      decisions: decisions || [],
-      actionItems: actionItems || [],
-      recordedBy: req.user.id,
-      recordedAt: new Date()
-    };
-    meeting.status = 'Completed';
-
-    await meeting.save();
-
-    const updatedMeeting = await Meeting.findById(meeting._id)
-      .populate('organizer', 'name email')
-      .populate('participants.user', 'name email')
-      .populate('minutes.recordedBy', 'name email');
-
-    res.status(200).json({
-      success: true,
-      message: 'Meeting minutes added successfully',
-      meeting: updatedMeeting
-    });
-  } catch (error) {
-    console.error('Add meeting minutes error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error adding meeting minutes',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Update participant status
-// @route   PATCH /api/meetings/:id/status
-// @access  Private
-exports.updateParticipantStatus = async (req, res) => {
-  try {
-    const meeting = await Meeting.findById(req.params.id);
-
-    if (!meeting) {
-      return res.status(404).json({
-        success: false,
-        message: 'Meeting not found'
-      });
-    }
-
-    const { status } = req.body;
-
-    if (!['Accepted', 'Declined', 'Tentative'].includes(status)) {
+    if (!title || !startTime || !endTime) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid status. Must be Accepted, Declined, or Tentative'
-      });
-    }
-
-    const participant = meeting.participants.find(
-      p => p.user.toString() === req.user.id
-    );
-
-    if (!participant) {
-      return res.status(404).json({
-        success: false,
-        message: 'You are not a participant in this meeting'
-      });
-    }
-
-    participant.status = status;
-
-    await meeting.save();
-
-    res.status(200).json({
-      success: true,
-      message: `Meeting ${status.toLowerCase()} successfully`,
-      meeting
-    });
-  } catch (error) {
-    console.error('Update participant status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating participant status',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Get my meetings (Employee/Client)
-// @route   GET /api/employee/meetings OR /api/client/meetings
-// @access  Private
-exports.getMyMeetings = async (req, res) => {
-  try {
-    const { status, upcoming } = req.query;
-    let query = {
-      $or: [
-        { 'participants.user': req.user.id },
-        { organizer: req.user.id }
-      ]
-    };
-
-    if (status) {
-      query.status = status;
-    }
-
-    if (upcoming === 'true') {
-      query.startTime = { $gte: new Date() };
-    }
-
-    const meetings = await Meeting.find(query)
-      .populate('organizer', 'name email')
-      .populate('participants.user', 'name email role')
-      .populate('project', 'name')
-      .sort({ startTime: 1 });
-
-    const transformedMeetings = meetings.map(meeting => ({
-      _id: meeting._id,
-      meetingId: meeting.meetingId,
-      title: meeting.title,
-      description: meeting.description,
-      dateTime: meeting.startTime,
-      duration: meeting.duration,
-      meetingType: meeting.location === 'Online' ? 'online' : 'in-person',
-      location: meeting.location,
-      meetingLink: meeting.meetingLink,
-      status: meeting.status,
-      organizer: meeting.organizer,
-      participants: meeting.participants,
-      project: meeting.project,
-      projectName: meeting.project?.name
-    }));
-
-    res.status(200).json({
-      success: true,
-      count: transformedMeetings.length,
-      meetings: transformedMeetings
-    });
-  } catch (error) {
-    console.error('Get my meetings error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching meetings',
-      error: error.message
-    });
-  }
-};
-
-// @desc    Schedule meeting (Client)
-// @route   POST /api/client/meetings
-// @access  Private/Client
-exports.clientScheduleMeeting = async (req, res) => {
-  try {
-    const { 
-      title, 
-      description, 
-      dateTime,
-      duration, 
-      meetingType,
-      location, 
-      meetingLink, 
-      projectId 
-    } = req.body;
-
-    console.log('📥 Client meeting request:', req.body);
-
-    if (!title || !dateTime || !duration) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide title, date/time, and duration'
-      });
-    }
-
-    const startTime = new Date(dateTime);
-    const endTime = new Date(startTime.getTime() + duration * 60000);
-
-    if (startTime < new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Meeting date must be in the future'
+        message: 'Please provide title, start time, and end time'
       });
     }
 
     const meetingCount = await Meeting.countDocuments();
-    const meetingId = `MTG${String(meetingCount + 1).padStart(5, '0')}`;
+    const meetingId = `MTG${String(meetingCount + 1).padStart(4, '0')}`;
 
-    const mappedLocation = meetingType === 'online' ? 'Online' : 'Office';
-
-    if (meetingType === 'in-person' && (!location || !location.trim())) {
-      return res.status(400).json({
-        success: false,
-        message: 'Location is required for in-person meetings'
-      });
-    }
+    const participantsList = [
+      { user: req.user._id, status: 'Accepted' },
+      ...(participants || []).map(userId => ({
+        user: userId,
+        status: 'Invited'
+      }))
+    ];
 
     const meeting = await Meeting.create({
       meetingId,
-      title: title.trim(),
-      description: description?.trim() || '',
-      type: 'Client',
-      organizer: req.user.id,
-      startTime,
-      endTime,
-      duration: parseInt(duration),
-      location: mappedLocation,
-      meetingLink: meetingLink?.trim() || '',
-      agenda: description?.trim() || '',
-      project: projectId || undefined,
-      participants: [{
-        user: req.user.id,
-        role: 'Organizer',
-        status: 'Accepted'
-      }],
+      title,
+      description: description || '',
+      type: type || 'Client',
+      organizer: req.user._id,
+      participants: participantsList,
+      startTime: new Date(startTime),
+      endTime: new Date(endTime),
+      duration: duration || 60,
+      location: location || 'Online',
+      meetingLink: meetingLink || '',
+      agenda: agenda || '',
       status: 'Scheduled'
     });
 
     const populatedMeeting = await Meeting.findById(meeting._id)
       .populate('organizer', 'name email')
-      .populate('participants.user', 'name email')
+      .populate('participants.user', 'name email role')
       .populate('project', 'name');
 
-    console.log('✅ Meeting created:', populatedMeeting);
+    await createMeetingNotifications(populatedMeeting, 'scheduled');
 
-    const transformedMeeting = {
-      _id: populatedMeeting._id,
-      meetingId: populatedMeeting.meetingId,
-      title: populatedMeeting.title,
-      description: populatedMeeting.description,
-      dateTime: populatedMeeting.startTime,
-      duration: populatedMeeting.duration,
-      meetingType: populatedMeeting.location === 'Online' ? 'online' : 'in-person',
-      location: populatedMeeting.location,
-      meetingLink: populatedMeeting.meetingLink,
-      status: populatedMeeting.status,
-      organizer: populatedMeeting.organizer,
-      participants: populatedMeeting.participants,
-      project: populatedMeeting.project,
-      projectName: populatedMeeting.project?.name
-    };
+    console.log('✅ CLIENT MEETING SCHEDULED SUCCESSFULLY');
 
     res.status(201).json({
       success: true,
       message: 'Meeting scheduled successfully',
-      meeting: transformedMeeting
+      meeting: populatedMeeting
     });
+
   } catch (error) {
-    console.error('❌ Client schedule meeting error:', error);
+    console.error('❌ CLIENT SCHEDULE MEETING ERROR:', error);
+
     res.status(500).json({
       success: false,
-      message: 'Error scheduling meeting',
+      message: 'Failed to schedule meeting',
       error: error.message
     });
   }
 };
 
-// @desc    Cancel meeting (Client)
-// @route   DELETE /api/client/meetings/:id
-// @access  Private/Client
+// ============================================
+// CLIENT - Cancel Meeting
+// ============================================
 exports.clientCancelMeeting = async (req, res) => {
   try {
-    const meeting = await Meeting.findById(req.params.id);
+    const meeting = await Meeting.findById(req.params.id)
+      .populate('organizer', 'name email role')
+      .populate('participants.user', 'name email role');
 
     if (!meeting) {
       return res.status(404).json({
@@ -721,25 +750,26 @@ exports.clientCancelMeeting = async (req, res) => {
       });
     }
 
-    if (meeting.organizer.toString() !== req.user.id) {
+    if (meeting.organizer._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
-        message: 'Not authorized to cancel this meeting'
+        message: 'Only the organizer can cancel this meeting'
       });
     }
 
-    meeting.status = 'Cancelled';
-    await meeting.save();
+    await createMeetingNotifications(meeting, 'cancelled');
+    await Meeting.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,
       message: 'Meeting cancelled successfully'
     });
+
   } catch (error) {
-    console.error('Client cancel meeting error:', error);
+    console.error('❌ Error cancelling meeting:', error);
     res.status(500).json({
       success: false,
-      message: 'Error cancelling meeting',
+      message: 'Failed to cancel meeting',
       error: error.message
     });
   }

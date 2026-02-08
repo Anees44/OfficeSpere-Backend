@@ -1,4 +1,3 @@
-
 const User = require("../models/User");
 const Employee = require("../models/Employee");
 const Client = require("../models/Client");
@@ -153,6 +152,10 @@ function formatTimeAgo(date) {
 
 const getEmployees = async (req, res) => {
   try {
+    console.log('====================================');
+    console.log('📋 FETCHING ALL EMPLOYEES FOR ADMIN');
+    console.log('====================================');
+
     const { search, department, status, page = 1, limit = 10 } = req.query;
 
     let query = {};
@@ -182,17 +185,29 @@ const getEmployees = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
+    console.log(`✅ Found ${employees.length} employees from database`);
+
+    // ✅✅✅ CRITICAL FIX: Include userId in transformed response
     const transformedEmployees = employees.map((employee) => {
       const userData = employee.userId || {};
 
+      // ✅ Extract the userId (User document's _id)
+      const userId = userData._id;
+
+      if (!userId) {
+        console.warn(`⚠️ Employee "${employee.name || employee.employeeId}" has no userId!`);
+      }
+
       return {
         _id: employee._id,
+        userId: userId,  // ✅✅✅ CRITICAL: This is the User ObjectId for meetings!
         name: userData.name || "No Name",
         email: userData.email || employee.email || "No Email",
         phone: userData.phone || employee.phone || "",
         position: employee.designation || "Employee",
         department: employee.department || "General",
         employeeId: employee.employeeId || "N/A",
+        designation: employee.designation || "Employee",  // ✅ Added for consistency
         status: employee.isActive ? "active" : "inactive",
         joinDate: employee.joiningDate || new Date(),
         salary: employee.salary || 0,
@@ -201,6 +216,19 @@ const getEmployees = async (req, res) => {
         rawEmployee: employee,
       };
     });
+
+    console.log('====================================');
+    console.log('✅ Sample transformed employee:');
+    if (transformedEmployees.length > 0) {
+      console.log(JSON.stringify({
+        _id: transformedEmployees[0]._id,
+        userId: transformedEmployees[0].userId,
+        name: transformedEmployees[0].name,
+        email: transformedEmployees[0].email,
+        employeeId: transformedEmployees[0].employeeId
+      }, null, 2));
+    }
+    console.log('====================================');
 
     res.status(200).json({
       success: true,
@@ -211,7 +239,12 @@ const getEmployees = async (req, res) => {
       employees: transformedEmployees,
     });
   } catch (error) {
+    console.error('====================================');
+    console.error('❌ GET EMPLOYEES ERROR');
+    console.error('====================================');
     console.error("Get employees error:", error);
+    console.error('====================================');
+    
     res.status(500).json({
       success: false,
       message: "Error fetching employees",
@@ -313,6 +346,7 @@ const addEmployee = async (req, res) => {
 
     const responseData = {
       _id: populatedEmployee._id,
+      userId: populatedEmployee.userId?._id,  // ✅ Include userId in response
       name: populatedEmployee.userId?.name || name,
       email: populatedEmployee.userId?.email || email,
       phone: populatedEmployee.userId?.phone || phone,
@@ -374,6 +408,7 @@ const getEmployee = async (req, res) => {
 
     const employeeData = {
       _id: employee._id,
+      userId: employee.userId?._id,  // ✅ Include userId
       name: employee.userId?.name || "No Name",
       email: employee.userId?.email || "No Email",
       phone: employee.userId?.phone || "",
@@ -484,6 +519,7 @@ const updateEmployee = async (req, res) => {
       message: "Employee updated successfully",
       employee: {
         _id: updatedEmployee._id,
+        userId: updatedEmployee.userId?._id,  // ✅ Include userId
         name: updatedEmployee.userId?.name,
         email: updatedEmployee.userId?.email,
         phone: updatedEmployee.userId?.phone,
