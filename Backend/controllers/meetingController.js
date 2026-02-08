@@ -37,6 +37,9 @@ const getUserIdFromParticipant = async (participantId) => {
 // ============================================
 // HELPER FUNCTION - Create Notifications
 // ============================================
+// ============================================
+// HELPER FUNCTION - Create Notifications
+// ============================================
 const createMeetingNotifications = async (meeting, notificationType = 'scheduled') => {
   try {
     console.log('====================================');
@@ -72,6 +75,20 @@ const createMeetingNotifications = async (meeting, notificationType = 'scheduled
       console.log('✅ Processed participants:', meeting.participants.length);
     }
 
+    // ✅✅✅ ADD THIS: If meeting is organized by client, notify all admins
+    const organizer = await User.findById(meeting.organizer).select('role');
+    if (organizer && organizer.role === 'client') {
+      console.log('🔔 Client meeting detected - Adding all admins to notification list');
+      
+      const admins = await User.find({ role: 'admin', isActive: true }).select('_id');
+      admins.forEach(admin => {
+        usersToNotify.add(admin._id.toString());
+        console.log('✅ Added admin to notify list:', admin._id);
+      });
+      
+      console.log(`✅ Added ${admins.length} admins to notification list`);
+    }
+
     console.log('📤 Total users to notify:', usersToNotify.size);
     console.log('📤 User IDs:', Array.from(usersToNotify));
 
@@ -81,8 +98,8 @@ const createMeetingNotifications = async (meeting, notificationType = 'scheduled
     }
 
     // Get organizer info for message
-    const organizer = await User.findById(meeting.organizer).select('name email');
-    const organizerName = organizer?.name || 'Admin';
+    const organizerInfo = await User.findById(meeting.organizer).select('name email');
+    const organizerName = organizerInfo?.name || 'Admin';
 
     // Determine notification message based on type
     let titlePrefix = '';
@@ -655,6 +672,8 @@ exports.updateParticipantStatus = async (req, res) => {
 // ============================================
 // CLIENT - Schedule Meeting
 // ============================================
+// meetingController.js - clientScheduleMeeting function
+
 exports.clientScheduleMeeting = async (req, res) => {
   try {
     console.log('====================================');
@@ -681,16 +700,27 @@ exports.clientScheduleMeeting = async (req, res) => {
       });
     }
 
+    // ✅✅✅ Automatically get all admins
+    const admins = await User.find({ role: 'admin', isActive: true }).select('_id');
+    console.log(`🔔 Found ${admins.length} admins to add as participants`);
+
     const meetingCount = await Meeting.countDocuments();
     const meetingId = `MTG${String(meetingCount + 1).padStart(4, '0')}`;
 
+    // ✅✅✅ Build participants list with client + admins + any additional participants
     const participantsList = [
-      { user: req.user._id, status: 'Accepted' },
+      { user: req.user._id, status: 'Accepted' }, // Client (organizer)
+      ...admins.map(admin => ({ 
+        user: admin._id, 
+        status: 'Invited' 
+      })), // All admins
       ...(participants || []).map(userId => ({
         user: userId,
         status: 'Invited'
-      }))
+      })) // Any additional participants from frontend
     ];
+
+    console.log(`👥 Total participants: ${participantsList.length}`);
 
     const meeting = await Meeting.create({
       meetingId,
@@ -698,7 +728,7 @@ exports.clientScheduleMeeting = async (req, res) => {
       description: description || '',
       type: type || 'Client',
       organizer: req.user._id,
-      participants: participantsList,
+      participants: participantsList, // ✅ Now includes admins
       startTime: new Date(startTime),
       endTime: new Date(endTime),
       duration: duration || 60,
@@ -713,6 +743,7 @@ exports.clientScheduleMeeting = async (req, res) => {
       .populate('participants.user', 'name email role')
       .populate('project', 'name');
 
+    // Notifications will now go to admins too (already handled by createMeetingNotifications)
     await createMeetingNotifications(populatedMeeting, 'scheduled');
 
     console.log('✅ CLIENT MEETING SCHEDULED SUCCESSFULLY');
