@@ -1,6 +1,3 @@
-// controllers/attendanceController.js
-// Attendance Check-in/Check-out, Corrections, Leave Requests
-
 const Attendance = require('../models/Attendance');
 const Employee = require('../models/Employee');
 const User = require('../models/User');
@@ -10,7 +7,7 @@ const { getIO } = require('../config/socket');
 
 const getPKTDate = (dateString) => {
   const PKT_OFFSET = 5 * 60 * 60 * 1000; // 5 hours in milliseconds
-  
+
   if (dateString) {
     const date = new Date(dateString);
     const utcDate = new Date(date.getTime() + PKT_OFFSET);
@@ -46,9 +43,24 @@ exports.checkIn = async (req, res) => {
     const { location, notes } = req.body;
     const userId = req.user._id;
 
+    // ✅✅✅ MANDATORY LOCATION VALIDATION
+    if (!location || !location.latitude || !location.longitude) {
+      console.log('❌ Location missing in check-in request');
+      return res.status(400).json({
+        success: false,
+        message: 'Location is required to mark attendance. Please enable location access and try again.'
+      });
+    }
+
+    console.log('✅ Location received:', {
+      lat: location.latitude,
+      lng: location.longitude,
+      accuracy: location.accuracy
+    });
+
     // Find employee
     const employee = await Employee.findOne({ userId });
-    
+
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -61,7 +73,7 @@ exports.checkIn = async (req, res) => {
     // Get today's date in PKT
     const todayStart = getPKTDate();
     const todayEnd = getEndOfDayPKT();
-    
+
     console.log('📅 Today (PKT):', todayStart.toISOString());
 
     // Check existing attendance
@@ -81,36 +93,40 @@ exports.checkIn = async (req, res) => {
     }
 
     const checkInTime = new Date();
-    
+
     // Check if late (after 9 AM PKT)
     const hour = new Date(checkInTime.getTime() + (5 * 60 * 60 * 1000)).getUTCHours();
     const isLate = hour >= 9;
 
-    // Create attendance
+    // ✅ Create attendance with MANDATORY location
+    // ✅ Create attendance with MANDATORY location
     const attendanceData = {
       employeeId: employee._id,
       date: todayStart,
       checkInTime: checkInTime,
-      checkInMethod: 'Manual', // Valid enum value
+      checkInMethod: 'Manual',
       status: 'present',
       isLate: isLate,
       checkInIpAddress: req.ip,
       checkInDeviceInfo: req.headers['user-agent'],
-      notes: notes || ''
-    };
-
-    // Add location if provided
-    if (location?.latitude && location?.longitude) {
-      attendanceData.checkInCoordinates = {
+      notes: notes || '',
+      checkInCoordinates: {
         latitude: location.latitude,
         longitude: location.longitude,
         accuracy: location.accuracy || 0
-      };
-      attendanceData.checkInLocation = 'Remote';
-    } else {
-      attendanceData.checkInLocation = 'Office';
-    }
-
+      },
+      // ✅ Save location name and details
+      checkInLocation: location.locationName || location.fullAddress || 'Remote',
+      checkInLocationDetails: {
+        shortName: location.locationName || 'Unknown Location',
+        fullAddress: location.fullAddress || '',
+        city: location.addressDetails?.city || '',
+        state: location.addressDetails?.state || '',
+        country: location.addressDetails?.country || '',
+        area: location.addressDetails?.area || '',
+        postalCode: location.addressDetails?.postalCode || ''
+      }
+    };
     let attendance;
     if (existingAttendance) {
       attendance = await Attendance.findByIdAndUpdate(
@@ -122,14 +138,14 @@ exports.checkIn = async (req, res) => {
       attendance = await Attendance.create(attendanceData);
     }
 
-    console.log('✅ CHECK-IN SUCCESSFUL');
+    console.log('✅ CHECK-IN SUCCESSFUL with location');
 
     // ✅ CREATE NOTIFICATION FOR ADMIN
     try {
       const Notification = require('../models/Notification');
       await Notification.create({
         title: 'Employee Check-In',
-        message: `${employee.name} has checked in at ${new Date(checkInTime).toLocaleTimeString()}${isLate ? ' (Late)' : ''}`,
+        message: `${employee.name} has checked in at ${new Date(checkInTime).toLocaleTimeString()}${isLate ? ' (Late)' : ''} from ${location.locationName || 'Unknown Location'}`,
         type: 'attendance',
         role: 'admin',
         isRead: false,
@@ -137,7 +153,12 @@ exports.checkIn = async (req, res) => {
           employeeId: employee._id,
           employeeName: employee.name,
           checkInTime: checkInTime,
-          isLate: isLate
+          isLate: isLate,
+          location: location.locationName || 'Unknown',
+          coordinates: {
+            lat: location.latitude,
+            lng: location.longitude
+          }
         }
       });
       console.log('📬 Notification created for admin');
@@ -176,7 +197,6 @@ exports.checkIn = async (req, res) => {
     });
   }
 };
-
 // @desc    Check out
 // @route   POST /api/employee/attendance/checkout
 // @access  Private (Employee)
@@ -624,7 +644,7 @@ exports.requestLeave = async (req, res) => {
     const userId = req.user._id || req.user.id;
 
     const employee = await Employee.findOne({ userId: userId });
-     await notifyLeaveRequest({
+    await notifyLeaveRequest({
       employeeId: employee._id,
       employeeName: employee.userId?.name,
       leaveType: leaveType,
@@ -920,11 +940,11 @@ exports.getDailyAttendance = async (req, res) => {
     console.log('====================================');
 
     const dateParam = req.query.date || new Date().toISOString().split('T')[0];
-    
+
     // USE PKT TIMEZONE
     const queryDate = getPKTDate(dateParam);
     const nextDay = getEndOfDayPKT(dateParam);
-    
+
     console.log('📅 Query date (PKT):', queryDate.toISOString());
     console.log('📅 End of day (PKT):', nextDay.toISOString());
 
@@ -1011,7 +1031,7 @@ exports.getDailyAttendance = async (req, res) => {
 exports.getMonthlyAttendance = async (req, res) => {
   try {
     const { month, year } = req.query;
-    
+
     const currentDate = new Date();
     const targetMonth = month ? parseInt(month) - 1 : currentDate.getMonth();
     const targetYear = year ? parseInt(year) : currentDate.getFullYear();

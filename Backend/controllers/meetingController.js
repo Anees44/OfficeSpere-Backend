@@ -1,5 +1,5 @@
 // controllers/meetingController.js
-// ✅ COMPLETE PROPER FIX - Handles both User IDs and Employee records
+// ✅ COMPLETE FIX - Update meeting + Socket events for real-time updates
 
 const Meeting = require('../models/Meeting');
 const Notification = require('../models/Notification');
@@ -34,9 +34,6 @@ const getUserIdFromParticipant = async (participantId) => {
   }
 };
 
-// ============================================
-// HELPER FUNCTION - Create Notifications
-// ============================================
 // ============================================
 // HELPER FUNCTION - Create Notifications
 // ============================================
@@ -75,7 +72,7 @@ const createMeetingNotifications = async (meeting, notificationType = 'scheduled
       console.log('✅ Processed participants:', meeting.participants.length);
     }
 
-    // ✅✅✅ ADD THIS: If meeting is organized by client, notify all admins
+    // ✅ If meeting is organized by client, notify all admins
     const organizer = await User.findById(meeting.organizer).select('role');
     if (organizer && organizer.role === 'client') {
       console.log('🔔 Client meeting detected - Adding all admins to notification list');
@@ -297,7 +294,7 @@ exports.scheduleMeeting = async (req, res) => {
       });
     }
 
-    // ✅✅✅ CRITICAL FIX: Resolve participant IDs to actual User IDs
+    // ✅ Resolve participant IDs to actual User IDs
     console.log('====================================');
     console.log('🔍 RESOLVING PARTICIPANTS');
     console.log('====================================');
@@ -378,6 +375,16 @@ exports.scheduleMeeting = async (req, res) => {
     // Create notifications
     await createMeetingNotifications(populatedMeeting, 'scheduled');
 
+    // ✅✅✅ Emit Socket.IO event for real-time meeting list update
+    const io = getIO();
+    if (io) {
+      console.log('📡 Emitting meeting-created event via Socket.IO');
+      io.emit('meeting-created', {
+        meeting: populatedMeeting,
+        message: `New meeting scheduled: ${populatedMeeting.title}`
+      });
+    }
+
     console.log('====================================');
     console.log('✅ MEETING SCHEDULED SUCCESSFULLY');
     console.log('Meeting ID:', meeting.meetingId);
@@ -441,41 +448,139 @@ exports.getMeeting = async (req, res) => {
 // ============================================
 exports.updateMeeting = async (req, res) => {
   try {
-    console.log('📝 Updating meeting:', req.params.id);
-    console.log('Update data:', req.body);
+    console.log('====================================');
+    console.log('📝 ADMIN UPDATE MEETING REQUEST');
+    console.log('====================================');
+    console.log('Meeting ID:', req.params.id);
+    console.log('Update data:', JSON.stringify(req.body, null, 2));
 
     let meeting = await Meeting.findById(req.params.id);
 
     if (!meeting) {
+      console.log('❌ Meeting not found');
       return res.status(404).json({
         success: false,
         message: 'Meeting not found'
       });
     }
 
-    // Update meeting
-    meeting = await Meeting.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    )
+    console.log('📋 Found meeting:', meeting.title);
+
+    const {
+      title,
+      description,
+      type,
+      startTime,
+      endTime,
+      duration,
+      location,
+      meetingLink,
+      participants,
+      project,
+      agenda
+    } = req.body;
+
+    // ✅✅✅ CRITICAL FIX: Resolve participants properly
+    if (participants && participants.length > 0) {
+      console.log('====================================');
+      console.log('🔍 RESOLVING PARTICIPANTS FOR UPDATE');
+      console.log('====================================');
+      console.log('Participant IDs received:', participants);
+
+      const resolvedUserIds = [];
+      const failedParticipants = [];
+
+      for (const participantId of participants) {
+        const userId = await getUserIdFromParticipant(participantId);
+        if (userId) {
+          resolvedUserIds.push(userId);
+        } else {
+          failedParticipants.push(participantId);
+        }
+      }
+
+      console.log('✅ Resolved User IDs:', resolvedUserIds);
+
+      if (failedParticipants.length > 0) {
+        console.error('❌ Failed to resolve participants:', failedParticipants);
+        return res.status(400).json({
+          success: false,
+          message: `Invalid participant IDs: ${failedParticipants.join(', ')}`
+        });
+      }
+
+      if (resolvedUserIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'No valid participants found'
+        });
+      }
+
+      // Update participants with resolved User IDs
+      meeting.participants = resolvedUserIds.map(userId => ({
+        user: userId,
+        status: 'Invited'
+      }));
+
+      console.log('✅ Participants updated');
+      console.log('====================================');
+    }
+
+    // Update other fields
+    if (title) meeting.title = title;
+    if (description !== undefined) meeting.description = description;
+    if (type) meeting.type = type;
+    if (startTime) meeting.startTime = new Date(startTime);
+    if (endTime) meeting.endTime = new Date(endTime);
+    if (duration) meeting.duration = duration;
+    if (location) meeting.location = location;
+    if (meetingLink !== undefined) meeting.meetingLink = meetingLink;
+    if (agenda !== undefined) meeting.agenda = agenda;
+    if (project !== undefined) meeting.project = project || null;
+
+    // Save the meeting
+    await meeting.save();
+
+    console.log('✅ Meeting saved to database');
+
+    // Populate meeting data
+    const updatedMeeting = await Meeting.findById(meeting._id)
       .populate('organizer', 'name email')
       .populate('participants.user', 'name email role')
       .populate('project', 'name');
 
-    // Create notifications for updated meeting
-    await createMeetingNotifications(meeting, 'updated');
+    console.log('✅ Meeting populated');
 
-    console.log('✅ Meeting updated successfully');
+    // Create notifications for updated meeting
+    await createMeetingNotifications(updatedMeeting, 'updated');
+
+    // ✅✅✅ Emit Socket.IO event for real-time update
+    const io = getIO();
+    if (io) {
+      console.log('📡 Emitting meeting-updated event via Socket.IO');
+      io.emit('meeting-updated', {
+        meeting: updatedMeeting,
+        message: `Meeting updated: ${updatedMeeting.title}`
+      });
+    }
+
+    console.log('====================================');
+    console.log('✅ MEETING UPDATED SUCCESSFULLY');
+    console.log('====================================');
 
     res.status(200).json({
       success: true,
       message: 'Meeting updated successfully',
-      meeting
+      meeting: updatedMeeting
     });
 
   } catch (error) {
-    console.error('❌ Error updating meeting:', error);
+    console.error('====================================');
+    console.error('❌ UPDATE MEETING ERROR');
+    console.error('====================================');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
+
     res.status(500).json({
       success: false,
       message: 'Failed to update meeting',
@@ -508,6 +613,9 @@ exports.deleteMeeting = async (req, res) => {
 
     console.log('📋 Meeting found:', meeting.title);
 
+    // Store meeting title for socket event
+    const meetingTitle = meeting.title;
+
     // Create deletion notifications BEFORE deleting
     await createMeetingNotifications(meeting, 'deleted');
 
@@ -515,6 +623,18 @@ exports.deleteMeeting = async (req, res) => {
     await Meeting.findByIdAndDelete(req.params.id);
 
     console.log('✅ Meeting deleted successfully');
+
+    // ✅✅✅ Emit Socket.IO event for real-time deletion
+    const io = getIO();
+    if (io) {
+      console.log('📡 Emitting meeting-deleted event via Socket.IO');
+      io.emit('meeting-deleted', {
+        meetingId: req.params.id,
+        meetingTitle: meetingTitle,
+        message: `Meeting deleted: ${meetingTitle}`
+      });
+    }
+
     console.log('====================================');
 
     res.status(200).json({
@@ -672,8 +792,6 @@ exports.updateParticipantStatus = async (req, res) => {
 // ============================================
 // CLIENT - Schedule Meeting
 // ============================================
-// meetingController.js - clientScheduleMeeting function
-
 exports.clientScheduleMeeting = async (req, res) => {
   try {
     console.log('====================================');
@@ -700,14 +818,14 @@ exports.clientScheduleMeeting = async (req, res) => {
       });
     }
 
-    // ✅✅✅ Automatically get all admins
+    // ✅ Automatically get all admins
     const admins = await User.find({ role: 'admin', isActive: true }).select('_id');
     console.log(`🔔 Found ${admins.length} admins to add as participants`);
 
     const meetingCount = await Meeting.countDocuments();
     const meetingId = `MTG${String(meetingCount + 1).padStart(4, '0')}`;
 
-    // ✅✅✅ Build participants list with client + admins + any additional participants
+    // ✅ Build participants list with client + admins + any additional participants
     const participantsList = [
       { user: req.user._id, status: 'Accepted' }, // Client (organizer)
       ...admins.map(admin => ({ 
@@ -728,7 +846,7 @@ exports.clientScheduleMeeting = async (req, res) => {
       description: description || '',
       type: type || 'Client',
       organizer: req.user._id,
-      participants: participantsList, // ✅ Now includes admins
+      participants: participantsList,
       startTime: new Date(startTime),
       endTime: new Date(endTime),
       duration: duration || 60,
@@ -743,8 +861,18 @@ exports.clientScheduleMeeting = async (req, res) => {
       .populate('participants.user', 'name email role')
       .populate('project', 'name');
 
-    // Notifications will now go to admins too (already handled by createMeetingNotifications)
+    // Notifications will now go to admins too
     await createMeetingNotifications(populatedMeeting, 'scheduled');
+
+    // ✅✅✅ Emit Socket.IO event for real-time meeting list update
+    const io = getIO();
+    if (io) {
+      console.log('📡 Emitting meeting-created event via Socket.IO');
+      io.emit('meeting-created', {
+        meeting: populatedMeeting,
+        message: `New meeting scheduled: ${populatedMeeting.title}`
+      });
+    }
 
     console.log('✅ CLIENT MEETING SCHEDULED SUCCESSFULLY');
 
@@ -788,8 +916,22 @@ exports.clientCancelMeeting = async (req, res) => {
       });
     }
 
+    // Store meeting title for socket event
+    const meetingTitle = meeting.title;
+
     await createMeetingNotifications(meeting, 'cancelled');
     await Meeting.findByIdAndDelete(req.params.id);
+
+    // ✅✅✅ Emit Socket.IO event for real-time deletion
+    const io = getIO();
+    if (io) {
+      console.log('📡 Emitting meeting-deleted event via Socket.IO');
+      io.emit('meeting-deleted', {
+        meetingId: req.params.id,
+        meetingTitle: meetingTitle,
+        message: `Meeting cancelled: ${meetingTitle}`
+      });
+    }
 
     res.status(200).json({
       success: true,

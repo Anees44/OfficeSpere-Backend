@@ -743,37 +743,60 @@ exports.getProjectMilestones = async (req, res) => {
 // @desc    Get client's meetings
 // @route   GET /api/client/meetings
 // @access  Private (Client only)
+// controllers/clientController.js
+
+// @desc    Get client's meetings
+// @route   GET /api/client/meetings
+// @access  Private (Client only)
 exports.getMyMeetings = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    console.log('====================================');
+    console.log('📅 FETCHING CLIENT MEETINGS');
+    console.log('====================================');
+    console.log('User ID:', req.user.id);
+    console.log('User role:', req.user.role);
+    
+    const userId = req.user.id;
     const { status, upcoming } = req.query;
 
-    // Build query
-    const query = { participants: clientId };
+    // ✅ CRITICAL FIX: Search by User ID in participants.user field
+    const query = { 
+      'participants.user': userId  // ✅ This is the correct way!
+    };
 
     if (status) {
       query.status = status;
     }
 
     if (upcoming === 'true') {
-      query.meetingDate = { $gte: new Date() };
+      query.startTime = { $gte: new Date() };  // ✅ Changed from meetingDate to startTime
       query.status = { $ne: 'cancelled' };
     }
 
+    console.log('🔍 Query:', JSON.stringify(query, null, 2));
+
     const meetings = await Meeting.find(query)
       .populate('organizer', 'name email')
-      .populate('participants', 'name email role')
+      .populate('participants.user', 'name email role')  // ✅ Populate participants.user
       .populate('project', 'name')
-      .sort({ meetingDate: upcoming === 'true' ? 1 : -1 })
+      .sort({ startTime: upcoming === 'true' ? 1 : -1 })  // ✅ Sort by startTime
       .lean();
+
+    console.log(`✅ Found ${meetings.length} meetings for client`);
+    console.log('====================================');
 
     res.status(200).json({
       success: true,
       count: meetings.length,
-      data: meetings
+      meetings  // ✅ Changed from 'data' to 'meetings' to match frontend
     });
+    
   } catch (error) {
-    console.error('Get client meetings error:', error);
+    console.error('====================================');
+    console.error('❌ GET CLIENT MEETINGS ERROR');
+    console.error('====================================');
+    console.error('Error:', error);
+    
     res.status(500).json({
       success: false,
       message: 'Failed to fetch meetings',
@@ -788,14 +811,17 @@ exports.getMyMeetings = async (req, res) => {
 exports.getMeeting = async (req, res) => {
   try {
     const { id } = req.params;
-    const clientId = req.user.id;
+    const userId = req.user.id;
 
+    console.log('📋 Fetching meeting:', id, 'for user:', userId);
+
+    // ✅ CRITICAL FIX: Search by User ID
     const meeting = await Meeting.findOne({
       _id: id,
-      participants: clientId
+      'participants.user': userId  // ✅ Correct query
     })
       .populate('organizer', 'name email')
-      .populate('participants', 'name email role avatar')
+      .populate('participants.user', 'name email role avatar')
       .populate('project', 'name')
       .lean();
 
@@ -810,8 +836,9 @@ exports.getMeeting = async (req, res) => {
       success: true,
       data: meeting
     });
+    
   } catch (error) {
-    console.error('Get meeting error:', error);
+    console.error('❌ Get meeting error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch meeting',
@@ -819,7 +846,6 @@ exports.getMeeting = async (req, res) => {
     });
   }
 };
-
 // @desc    Schedule a new meeting
 // @route   POST /api/client/meetings
 // @access  Private (Client only)

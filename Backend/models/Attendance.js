@@ -14,10 +14,20 @@ const attendanceSchema = new mongoose.Schema(
     checkInTime: {
       type: Date,
     },
+    // ✅ FIXED: Remove enum restriction to allow any location name
     checkInLocation: {
       type: String,
-      enum: ["Office", "Remote", "Field"],
-      default: "Office",
+      default: "Remote",
+    },
+    // ✅ NEW: Detailed location information
+    checkInLocationDetails: {
+      shortName: { type: String }, // e.g., "Gulshan-e-Iqbal, Karachi"
+      fullAddress: { type: String }, // Full formatted address
+      city: { type: String },
+      state: { type: String },
+      country: { type: String },
+      area: { type: String },
+      postalCode: { type: String }
     },
     checkInCoordinates: {
       latitude: Number,
@@ -34,9 +44,19 @@ const attendanceSchema = new mongoose.Schema(
     checkOutTime: {
       type: Date,
     },
+    // ✅ FIXED: Remove enum restriction for checkout location too
     checkOutLocation: {
       type: String,
-      enum: ["Office", "Remote", "Field"],
+    },
+    // ✅ NEW: Detailed checkout location information
+    checkOutLocationDetails: {
+      shortName: { type: String },
+      fullAddress: { type: String },
+      city: { type: String },
+      state: { type: String },
+      country: { type: String },
+      area: { type: String },
+      postalCode: { type: String }
     },
     checkOutCoordinates: {
       latitude: Number,
