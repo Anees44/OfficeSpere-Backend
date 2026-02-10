@@ -34,11 +34,15 @@ const getEndOfDayPKT = (dateString) => {
 // @desc    Check in (Clock in)
 // @route   POST /api/employee/attendance/checkin
 // @access  Private (Employee)
+// ✅✅✅ COMPLETELY FIXED CHECK-IN FUNCTION
+// Properly saves location name and details to database
+
 exports.checkIn = async (req, res) => {
   try {
     console.log('====================================');
     console.log('🔐 CHECK-IN REQUEST');
     console.log('====================================');
+    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
 
     const { location, notes } = req.body;
     const userId = req.user._id;
@@ -55,7 +59,9 @@ exports.checkIn = async (req, res) => {
     console.log('✅ Location received:', {
       lat: location.latitude,
       lng: location.longitude,
-      accuracy: location.accuracy
+      accuracy: location.accuracy,
+      locationName: location.locationName,
+      fullAddress: location.fullAddress
     });
 
     // Find employee
@@ -71,6 +77,29 @@ exports.checkIn = async (req, res) => {
     console.log('✅ Employee found:', employee.name);
 
     // Get today's date in PKT
+    const getPKTDate = (dateString) => {
+      const PKT_OFFSET = 5 * 60 * 60 * 1000;
+      if (dateString) {
+        const date = new Date(dateString);
+        const utcDate = new Date(date.getTime() + PKT_OFFSET);
+        utcDate.setUTCHours(0, 0, 0, 0);
+        return utcDate;
+      } else {
+        const now = new Date();
+        const pktNow = new Date(now.getTime() + PKT_OFFSET);
+        pktNow.setUTCHours(0, 0, 0, 0);
+        return pktNow;
+      }
+    };
+
+    const getEndOfDayPKT = (dateString) => {
+      const PKT_OFFSET = 5 * 60 * 60 * 1000;
+      const date = new Date(dateString || new Date());
+      const utcDate = new Date(date.getTime() + PKT_OFFSET);
+      utcDate.setUTCHours(23, 59, 59, 999);
+      return utcDate;
+    };
+
     const todayStart = getPKTDate();
     const todayEnd = getEndOfDayPKT();
 
@@ -98,7 +127,23 @@ exports.checkIn = async (req, res) => {
     const hour = new Date(checkInTime.getTime() + (5 * 60 * 60 * 1000)).getUTCHours();
     const isLate = hour >= 9;
 
-    // ✅ Create attendance with MANDATORY location
+    // ✅✅✅ CRITICAL FIX: Properly structure location data
+    const checkInLocationData = location.locationName || location.fullAddress || 'Unknown Location';
+    
+    const checkInLocationDetailsData = {
+      shortName: location.locationName || 'Unknown Location',
+      fullAddress: location.fullAddress || '',
+      city: location.addressDetails?.city || '',
+      state: location.addressDetails?.state || '',
+      country: location.addressDetails?.country || '',
+      area: location.addressDetails?.area || '',
+      postalCode: location.addressDetails?.postalCode || ''
+    };
+
+    console.log('✅ Saving location data:');
+    console.log('  - checkInLocation:', checkInLocationData);
+    console.log('  - checkInLocationDetails:', JSON.stringify(checkInLocationDetailsData, null, 2));
+
     // ✅ Create attendance with MANDATORY location
     const attendanceData = {
       employeeId: employee._id,
@@ -110,23 +155,24 @@ exports.checkIn = async (req, res) => {
       checkInIpAddress: req.ip,
       checkInDeviceInfo: req.headers['user-agent'],
       notes: notes || '',
+      
+      // ✅✅✅ CRITICAL: Properly save coordinates
       checkInCoordinates: {
         latitude: location.latitude,
         longitude: location.longitude,
         accuracy: location.accuracy || 0
       },
-      // ✅ Save location name and details
-      checkInLocation: location.locationName || location.fullAddress || 'Remote',
-      checkInLocationDetails: {
-        shortName: location.locationName || 'Unknown Location',
-        fullAddress: location.fullAddress || '',
-        city: location.addressDetails?.city || '',
-        state: location.addressDetails?.state || '',
-        country: location.addressDetails?.country || '',
-        area: location.addressDetails?.area || '',
-        postalCode: location.addressDetails?.postalCode || ''
-      }
+      
+      // ✅✅✅ CRITICAL: Properly save location name
+      checkInLocation: checkInLocationData,
+      
+      // ✅✅✅ CRITICAL: Properly save location details
+      checkInLocationDetails: checkInLocationDetailsData
     };
+
+    console.log('📦 Full attendance data to save:');
+    console.log(JSON.stringify(attendanceData, null, 2));
+
     let attendance;
     if (existingAttendance) {
       attendance = await Attendance.findByIdAndUpdate(
@@ -139,13 +185,18 @@ exports.checkIn = async (req, res) => {
     }
 
     console.log('✅ CHECK-IN SUCCESSFUL with location');
+    console.log('✅ Saved attendance:', {
+      _id: attendance._id,
+      checkInLocation: attendance.checkInLocation,
+      checkInLocationDetails: attendance.checkInLocationDetails
+    });
 
     // ✅ CREATE NOTIFICATION FOR ADMIN
     try {
       const Notification = require('../models/Notification');
       await Notification.create({
         title: 'Employee Check-In',
-        message: `${employee.name} has checked in at ${new Date(checkInTime).toLocaleTimeString()}${isLate ? ' (Late)' : ''} from ${location.locationName || 'Unknown Location'}`,
+        message: `${employee.name} has checked in at ${new Date(checkInTime).toLocaleTimeString()}${isLate ? ' (Late)' : ''} from ${checkInLocationData}`,
         type: 'attendance',
         role: 'admin',
         isRead: false,
@@ -154,7 +205,7 @@ exports.checkIn = async (req, res) => {
           employeeName: employee.name,
           checkInTime: checkInTime,
           isLate: isLate,
-          location: location.locationName || 'Unknown',
+          location: checkInLocationData,
           coordinates: {
             lat: location.latitude,
             lng: location.longitude

@@ -1108,6 +1108,9 @@ const getProjects = async (req, res) => {
 // @desc    Get daily attendance for admin dashboard & attendance monitor
 // @route   GET /api/admin/attendance
 // @access  Private/Admin
+// ✅✅✅ UPDATED getDailyAttendance Function
+// Now includes full location information for admin display
+
 const getDailyAttendance = async (req, res) => {
   try {
     console.log('====================================');
@@ -1153,7 +1156,7 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('✅ Attendance records found:', attendanceRecords.length);
 
-    // ✅ Map all employees with their attendance status
+    // ✅✅✅ CRITICAL FIX: Map employees with FULL LOCATION DATA
     const attendanceData = allEmployees.map(employee => {
       const record = attendanceRecords.find(
         r => r.employeeId && r.employeeId._id.toString() === employee._id.toString()
@@ -1178,6 +1181,14 @@ const getDailyAttendance = async (req, res) => {
           finalStatus = 'absent';
         }
 
+        // ✅✅✅ CRITICAL: Include FULL location information
+        console.log('📍 Location data for', employee.userId?.name || employee.name, ':', {
+          checkInLocation: record.checkInLocation,
+          checkInLocationDetails: record.checkInLocationDetails,
+          shortName: record.checkInLocationDetails?.shortName,
+          fullAddress: record.checkInLocationDetails?.fullAddress
+        });
+
         return {
           _id: record._id,
           employeeName: employee.userId?.name || employee.name || 'Unknown',
@@ -1193,8 +1204,25 @@ const getDailyAttendance = async (req, res) => {
           totalHours: workHours ? `${workHours}h` : '-',
           status: finalStatus,
           isLate: record.isLate || false,
+          
+          // ✅✅✅ CRITICAL: Include ALL location fields
+          checkInLocation: record.checkInLocation,
+          checkInLocationDetails: record.checkInLocationDetails || {
+            shortName: record.checkInLocation || 'Unknown',
+            fullAddress: '',
+            city: '',
+            state: '',
+            country: '',
+            area: '',
+            postalCode: ''
+          },
+          checkInCoordinates: record.checkInCoordinates,
+          
+          // ✅ Also provide as "location" for backward compatibility
+          location: record.checkInLocation || 'Unknown Location',
         };
       } else {
+        // Employee hasn't checked in
         return {
           _id: null,
           employeeName: employee.userId?.name || employee.name || 'Unknown',
@@ -1209,7 +1237,11 @@ const getDailyAttendance = async (req, res) => {
           workHours: 0,
           totalHours: '-',
           status: 'absent',
-          isLate: false
+          isLate: false,
+          checkInLocation: null,
+          checkInLocationDetails: null,
+          checkInCoordinates: null,
+          location: null
         };
       }
     });
@@ -1245,6 +1277,7 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('====================================');
     console.log('✅ Sending response with', sortedData.length, 'records');
+    console.log('✅ Sample record with location:', sortedData.find(r => r.checkInLocation));
     console.log('====================================');
 
     res.status(200).json({
@@ -1269,7 +1302,6 @@ const getDailyAttendance = async (req, res) => {
     });
   }
 };
-
 // ============================================
 // EXPORTS
 // ============================================
