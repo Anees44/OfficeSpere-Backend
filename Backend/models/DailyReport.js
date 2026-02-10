@@ -6,106 +6,86 @@ const dailyReportSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      uppercase: true,
+      uppercase: true
     },
-    employee: {
+    employee: { // ✅ Must be "employee" not "employeeId"
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Employee',
-      required: true,
+      required: true
     },
     date: {
       type: Date,
       required: true,
-    },
-    tasksCompleted: [
-      {
-        task: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Task',
-        },
-        description: String,
-        hoursSpent: Number,
-        status: String,
-      },
-    ],
-    tasksInProgress: [
-      {
-        task: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Task',
-        },
-        description: String,
-        progress: Number, // percentage
-        blockers: String,
-      },
-    ],
-    plannedForTomorrow: [
-      {
-        task: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Task',
-        },
-        description: String,
-        estimatedHours: Number,
-      },
-    ],
-    achievements: {
-      type: String,
-    },
-    challenges: {
-      type: String,
-    },
-    blockers: {
-      type: String,
-    },
-    suggestions: {
-      type: String,
+      default: Date.now
     },
     totalHoursWorked: {
       type: Number,
       required: true,
       min: 0,
-      max: 24,
+      max: 24
     },
+    achievements: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    challenges: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    blockers: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    suggestions: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    tasksCompleted: [{
+      description: String,
+      hoursSpent: Number
+    }],
+    tasksInProgress: [{
+      description: String,
+      estimatedCompletion: Date
+    }],
+    plannedForTomorrow: [{
+      description: String
+    }],
     productivityRating: {
       type: Number,
       min: 1,
-      max: 5,
+      max: 5
     },
     mood: {
       type: String,
-      enum: ['Excellent', 'Good', 'Okay', 'Low', 'Stressed'],
-    },
-    attendanceId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Attendance',
-    },
-    submittedAt: {
-      type: Date,
-      default: Date.now,
-    },
-    reviewedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-    },
-    reviewedAt: Date,
-    feedback: {
-      type: String,
+      enum: ['Excellent', 'Good', 'Neutral', 'Low', 'Stressed']
     },
     status: {
       type: String,
       enum: ['Submitted', 'Reviewed', 'Approved'],
-      default: 'Submitted',
+      default: 'Submitted'
     },
+    submittedAt: {
+      type: Date,
+      default: Date.now
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    reviewedAt: Date,
+    adminNotes: String
   },
   {
-    timestamps: true,
+    timestamps: true
   }
 );
 
-// Compound index for employee + date (one report per day)
+// ✅ CRITICAL: Compound index with correct field name
 dailyReportSchema.index({ employee: 1, date: 1 }, { unique: true });
-dailyReportSchema.index({ date: 1 });
-dailyReportSchema.index({ status: 1 });
 
 module.exports = mongoose.model('DailyReport', dailyReportSchema);

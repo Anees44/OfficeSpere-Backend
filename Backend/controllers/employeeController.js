@@ -960,7 +960,7 @@ exports.getProject = async (req, res) => {
 
 exports.submitDailyReport = async (req, res) => {
   try {
-    const userId = req.user.id; // User ID from JWT
+    const userId = req.user.id;
     const {
       date,
       achievements,
@@ -968,11 +968,12 @@ exports.submitDailyReport = async (req, res) => {
       blockers,
       suggestions,
       totalHoursWorked,
-      plannedForTomorrow
+      plannedForTomorrow,
+      productivityRating,
+      mood
     } = req.body;
 
     console.log('📝 Submitting daily report for user:', userId);
-    console.log('📊 Report data:', req.body);
 
     // Validate required fields
     if (!date || totalHoursWorked === undefined) {
@@ -996,15 +997,13 @@ exports.submitDailyReport = async (req, res) => {
 
     // Check if report already exists for this date
     const reportDate = new Date(date);
-    reportDate.setHours(0, 0, 0, 0); // Start of day
-
-    console.log('📅 Checking for existing report on:', reportDate);
+    reportDate.setHours(0, 0, 0, 0);
 
     const existingReport = await DailyReport.findOne({
-      employee: employee._id,
+      employee: employee._id, // ✅ Use "employee" field
       date: {
         $gte: reportDate,
-        $lt: new Date(reportDate.getTime() + 24 * 60 * 60 * 1000) // Next day
+        $lt: new Date(reportDate.getTime() + 24 * 60 * 60 * 1000)
       }
     });
 
@@ -1019,22 +1018,20 @@ exports.submitDailyReport = async (req, res) => {
     const reportCount = await DailyReport.countDocuments();
     const reportId = `DR${(reportCount + 1).toString().padStart(4, '0')}`;
 
-    console.log('📄 Creating report with ID:', reportId);
-
-    // Create the daily report
+    // ✅ Create report with correct field name
     const dailyReport = await DailyReport.create({
       reportId: reportId,
-      employee: employee._id, // Use employee._id (ObjectId)
+      employee: employee._id, // ✅ Must be "employee" not "employeeId"
       date: reportDate,
       achievements: achievements || '',
       challenges: challenges || '',
       blockers: blockers || '',
       suggestions: suggestions || '',
       totalHoursWorked: parseFloat(totalHoursWorked),
+      productivityRating: productivityRating || null,
+      mood: mood || null,
       status: 'Submitted',
       submittedAt: new Date(),
-      
-      // These can be empty arrays for now
       tasksCompleted: [],
       tasksInProgress: [],
       plannedForTomorrow: plannedForTomorrow || []
@@ -1044,9 +1041,9 @@ exports.submitDailyReport = async (req, res) => {
 
     // Get populated report
     const populatedReport = await DailyReport.findById(dailyReport._id)
-      .populate('employee', 'employeeId designation department')
       .populate({
         path: 'employee',
+        select: 'employeeId designation department userId',
         populate: {
           path: 'userId',
           select: 'name email'
@@ -1062,7 +1059,6 @@ exports.submitDailyReport = async (req, res) => {
   } catch (error) {
     console.error('❌ Submit daily report error:', error);
     
-    // Handle mongoose validation errors
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -1072,7 +1068,6 @@ exports.submitDailyReport = async (req, res) => {
       });
     }
 
-    // Handle duplicate key error (unique index)
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -1087,7 +1082,6 @@ exports.submitDailyReport = async (req, res) => {
     });
   }
 };
-
 // @desc    Get my daily reports
 // @route   GET /api/employee/reports
 // @access  Private (Employee)

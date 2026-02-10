@@ -913,78 +913,135 @@ exports.getEmployeeReport = async (req, res) => {
   }
 };
 
+// @desc    Get daily reports for admin
+// @route   GET /api/reports/admin/daily
+// @access  Private/Admin
+// @desc    Get daily reports for admin
+// @route   GET /api/reports/admin/daily
+// @access  Private/Admin
 exports.getDailyReport = async (req, res) => {
   try {
-    const { startDate, endDate, employeeId, department } = req.query;
+    console.log('====================================');
+    console.log('📊 GET DAILY REPORTS - ADMIN');
+    console.log('Query params:', req.query);
+    console.log('====================================');
 
+    const { startDate, endDate, employeeId, department, status } = req.query;
+
+    // Set default date range if not provided
     const start = startDate
       ? new Date(startDate)
       : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    start.setHours(0, 0, 0, 0);
+
     const end = endDate ? new Date(endDate) : new Date();
+    end.setHours(23, 59, 59, 999);
+
+    console.log('📅 Date range:', {
+      start: start.toISOString(),
+      end: end.toISOString()
+    });
 
     // Build query
     let query = {
-      date: { $gte: start, $lte: end },
+      date: { $gte: start, $lte: end }
     };
 
+    // ✅ FIX: Add employee filter - handle both Employee._id and userId
     if (employeeId) {
-      query.employee = employeeId;
+      const Employee = require('../models/Employee');
+      let employee = await Employee.findById(employeeId);
+      
+      // If not found by Employee._id, try finding by userId
+      if (!employee) {
+        employee = await Employee.findOne({ userId: employeeId });
+      }
+      
+      if (employee) {
+        query.employee = employee._id;
+        console.log('📋 Filtering by employee:', employee.employeeId);
+      } else {
+        console.log('⚠️ Employee not found for ID:', employeeId);
+      }
     }
 
-    // Get daily reports with employee population
-    const dailyReports = await DailyReport.find(query)
-      .populate("employee", "name email department position")
-      .sort({ date: -1 });
+    // Add status filter if provided
+    if (status && status !== 'all') {
+      query.status = status;
+    }
 
-    // Filter by department if provided
+    console.log('🔍 Final query:', JSON.stringify(query, null, 2));
+
+    // ✅ FIX: Get daily reports with comprehensive population
+    const dailyReports = await DailyReport.find(query)
+      .populate({
+        path: 'employee',
+        select: 'employeeId designation department userId name email phone',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
+      .populate({
+        path: 'reviewedBy',
+        select: 'name email'
+      })
+      .sort({ date: -1 })
+      .lean();
+
+    console.log(`✅ Found ${dailyReports.length} daily reports`);
+
+    // Filter by department if provided (after population)
     let filteredReports = dailyReports;
-    if (department) {
+    if (department && department !== 'all') {
       filteredReports = dailyReports.filter(
-        (report) => report.employee?.department === department,
+        (report) => report.employee?.department === department
       );
+      console.log(`📋 After department filter: ${filteredReports.length} reports`);
     }
 
     if (filteredReports.length === 0) {
       return res.status(200).json({
         success: true,
         period: {
-          startDate: start.toISOString().split("T")[0],
-          endDate: end.toISOString().split("T")[0],
+          startDate: start.toISOString().split('T')[0],
+          endDate: end.toISOString().split('T')[0]
         },
         summary: {
           totalReports: 0,
           submittedCount: 0,
           reviewedCount: 0,
           approvedCount: 0,
-          avgHoursWorked: "0",
-          avgProductivityRating: "0",
+          avgHoursWorked: '0',
+          avgProductivityRating: '0'
         },
         data: [],
-        insights: ["No daily reports found for the selected period"],
+        reports: [],
+        insights: ['No daily reports found for the selected period']
       });
     }
 
     // Calculate summary statistics
     const totalReports = filteredReports.length;
     const submittedCount = filteredReports.filter(
-      (r) => r.status === "Submitted",
+      (r) => r.status === 'Submitted'
     ).length;
     const reviewedCount = filteredReports.filter(
-      (r) => r.status === "Reviewed",
+      (r) => r.status === 'Reviewed'
     ).length;
     const approvedCount = filteredReports.filter(
-      (r) => r.status === "Approved",
+      (r) => r.status === 'Approved'
     ).length;
 
     const totalHours = filteredReports.reduce(
       (sum, r) => sum + (r.totalHoursWorked || 0),
-      0,
+      0
     );
     const avgHoursWorked =
-      totalReports > 0 ? (totalHours / totalReports).toFixed(2) : "0";
+      totalReports > 0 ? (totalHours / totalReports).toFixed(2) : '0';
 
     const ratingsWithValue = filteredReports.filter(
-      (r) => r.productivityRating,
+      (r) => r.productivityRating
     );
     const avgProductivityRating =
       ratingsWithValue.length > 0
@@ -992,59 +1049,114 @@ exports.getDailyReport = async (req, res) => {
             ratingsWithValue.reduce((sum, r) => sum + r.productivityRating, 0) /
             ratingsWithValue.length
           ).toFixed(2)
-        : "0";
+        : '0';
 
-    // Format data for frontend
+    // ✅ FIX: Format data with ALL fields the frontend expects
     const formattedData = filteredReports.map((report) => ({
+      _id: report._id,
       reportId: report.reportId,
       employee: {
-        name: report.employee?.name || "Unknown",
-        email: report.employee?.email || "N/A",
-        department: report.employee?.department || "N/A",
-        position: report.employee?.position || "N/A",
+        _id: report.employee?._id,
+        name: report.employee?.userId?.name || report.employee?.name || 'Unknown',
+        email: report.employee?.userId?.email || report.employee?.email || 'N/A',
+        employeeId: report.employee?.employeeId || 'N/A',
+        department: report.employee?.department || 'N/A',
+        designation: report.employee?.designation || 'N/A'
       },
-      employeeName: report.employee?.name || "Unknown",
-      department: report.employee?.department || "N/A",
+      employeeName: report.employee?.userId?.name || report.employee?.name || 'Unknown',
+      department: report.employee?.department || 'N/A',
       date: report.date,
-      totalHoursWorked: report.totalHoursWorked,
-      tasksCompleted: report.tasksCompleted?.length || 0,
-      tasksInProgress: report.tasksInProgress?.length || 0,
-      productivityRating: report.productivityRating,
-      mood: report.mood,
-      status: report.status,
-      achievements: report.achievements,
-      challenges: report.challenges,
+      totalHoursWorked: report.totalHoursWorked || 0,
+      achievements: report.achievements || '',
+      challenges: report.challenges || '',
+      blockers: report.blockers || '',
+      suggestions: report.suggestions || '',
+      tasksCompleted: report.tasksCompleted || [],
+      tasksInProgress: report.tasksInProgress || [],
+      plannedForTomorrow: report.plannedForTomorrow || [],
+      productivityRating: report.productivityRating || 0,
+      mood: report.mood || 'N/A',
+      status: report.status || 'Submitted',
       submittedAt: report.submittedAt,
+      reviewedBy: report.reviewedBy ? {
+        _id: report.reviewedBy._id,
+        name: report.reviewedBy.name,
+        email: report.reviewedBy.email
+      } : null,
+      reviewedAt: report.reviewedAt,
+      adminNotes: report.adminNotes || '',
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt
     }));
+
+    // Generate insights
+    const insights = [];
+    
+    if (parseFloat(avgHoursWorked) < 6) {
+      insights.push(`⚠️ Average work hours (${avgHoursWorked}h) is below standard (8h)`);
+    } else if (parseFloat(avgHoursWorked) > 10) {
+      insights.push(`⚠️ Average work hours (${avgHoursWorked}h) indicates possible overwork`);
+    } else {
+      insights.push(`✅ Average work hours (${avgHoursWorked}h) is within normal range`);
+    }
+
+    if (submittedCount > 0) {
+      insights.push(`📋 ${submittedCount} report(s) are pending review`);
+    }
+
+    const challengeReports = filteredReports.filter((r) => 
+      r.challenges && r.challenges.trim().length > 0
+    ).length;
+    
+    if (challengeReports > 0) {
+      insights.push(`🚧 ${challengeReports} report(s) mention challenges or blockers`);
+    }
+
+    if (avgProductivityRating > 0) {
+      insights.push(`📊 Average productivity rating: ${avgProductivityRating}/5`);
+    }
+
+    const summary = {
+      totalReports,
+      submittedCount,
+      reviewedCount,
+      approvedCount,
+      avgHoursWorked,
+      avgProductivityRating,
+      totalHoursLogged: totalHours.toFixed(2)
+    };
+
+    console.log('📦 Summary:', summary);
+    console.log('✅ Sending response with', formattedData.length, 'reports');
+    console.log('====================================');
 
     res.status(200).json({
       success: true,
       period: {
-        startDate: start.toISOString().split("T")[0],
-        endDate: end.toISOString().split("T")[0],
+        startDate: start.toISOString().split('T')[0],
+        endDate: end.toISOString().split('T')[0]
       },
-      summary: {
-        totalReports,
-        submittedCount,
-        reviewedCount,
-        approvedCount,
-        avgHoursWorked,
-        avgProductivityRating,
-        totalHoursLogged: totalHours.toFixed(2),
-      },
+      summary,
       data: formattedData,
-      insights: generateDailyReportInsights(formattedData),
+      reports: formattedData, // ✅ Provide both for compatibility
+      insights
     });
+
   } catch (error) {
-    console.error("Get daily report error:", error);
+    console.error('====================================');
+    console.error('❌ GET DAILY REPORTS ERROR');
+    console.error('====================================');
+    console.error('Error:', error);
+    console.error('Stack:', error.stack);
+    console.error('====================================');
+
     res.status(500).json({
       success: false,
-      message: "Error fetching daily reports",
-      error: error.message,
+      message: 'Failed to fetch daily reports',
+      error: error.message
     });
   }
 };
-
 // Helper function for insights
 function generateDailyReportInsights(reportData) {
   const insights = [];
