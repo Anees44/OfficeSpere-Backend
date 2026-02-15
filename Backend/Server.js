@@ -70,9 +70,9 @@ const adminRoutes = require('./Routes/adminRoutes');
 const attendanceRoutes = require('./Routes/attendanceRoutes');
 const authRoutes = require('./Routes/authRoutes');
 const clientRoutes = require('./Routes/clientRoutes');
-const employeeRoutes = require('./routes/employeeRoutes');
+const employeeRoutes = require('./Routes/employeeRoutes');
 const meetingRoutes = require('./Routes/meetingRoutes');
-const reportRoutes = require('./routes/reportRoutes');
+const reportRoutes = require('./Routes/reportRoutes');
 const taskRoutes = require('./Routes/taskRoutes');
 
 // Check if uploadRoutes exists
