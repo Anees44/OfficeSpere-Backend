@@ -49,3 +49,5 @@ tmp/
 *.pid
 *.seed
 *.pid.lock
+.vercel
+.env*.local

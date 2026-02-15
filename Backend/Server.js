@@ -28,20 +28,28 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // CORS configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://office-sphere-frontend.vercel.app',
+  process.env.FRONTEND_URL?.replace(/\/$/, '')
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-      '*', 
-    'http://localhost:3000',
-    'https://office-sphere-frontend.vercel.app',
-    'https://office-spere-backend.vercel.app',
-    process.env.FRONTEND_URL?.replace(/\/$/, '') // trailing slash remove karo
-  ],
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS not allowed: ' + origin));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.options('*', cors());
 
+app.options('*', cors());
 // Serve static files (uploaded files)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
