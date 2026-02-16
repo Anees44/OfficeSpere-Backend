@@ -100,19 +100,19 @@ app.use(async (req, res, next) => {
 // ==========================================
 
 // Import Routes
-const adminRoutes = require('./Routes/adminRoutes');
-const attendanceRoutes = require('./Routes/attendanceRoutes');
-const authRoutes = require('./Routes/authRoutes');
-const clientRoutes = require('./Routes/clientRoutes');
-const employeeRoutes = require('./Routes/employeeRoutes');
-const meetingRoutes = require('./Routes/meetingRoutes');
-const reportRoutes = require('./Routes/reportRoutes');
-const taskRoutes = require('./Routes/taskRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const attendanceRoutes = require('./routes/attendanceRoutes');
+const authRoutes = require('./routes/authRoutes');
+const clientRoutes = require('./routes/clientRoutes');
+const employeeRoutes = require('./routes/employeeRoutes');
+const meetingRoutes = require('./routes/meetingRoutes');
+const reportRoutes = require('./routes/reportRoutes');
+const taskRoutes = require('./routes/taskRoutes');
 
 // Check if uploadRoutes exists
 let uploadRoutes;
 try {
-  uploadRoutes = require('./Routes/uploadRoutes');
+  uploadRoutes = require('./routes/uploadRoutes');
 } catch (err) {
   console.log('⚠️  uploadRoutes not found, skipping...');
 }
