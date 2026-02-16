@@ -99,7 +99,7 @@ app.use(async (req, res, next) => {
 // Routes
 // ==========================================
 
-// Import Routes
+// Import Routes - FIXED: Using capital 'Routes' for case-sensitive systems
 const adminRoutes = require('./Routes/adminRoutes');
 const attendanceRoutes = require('./Routes/attendanceRoutes');
 const authRoutes = require('./Routes/authRoutes');
