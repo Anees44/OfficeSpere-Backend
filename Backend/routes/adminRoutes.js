@@ -3,7 +3,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth.js');
 
 // ✅ Import from adminController
 const {
@@ -22,7 +22,7 @@ const {
   getSettings,
   updateSettings,
   getDailyAttendance  // ✅ Import attendance function
-} = require('../controllers/adminController');
+} = require('../controllers/adminController.js');
 
 const {
   getAdminNotifications,
@@ -39,7 +39,7 @@ const {
   updateProject,
   deleteProject,
   assignTeam
-} = require('../controllers/projectController');
+} = require('../controllers/projectController.js');
 
 const {
   getTasks,
@@ -47,7 +47,7 @@ const {
   createTask,
   updateTask,
   deleteTask
-} = require('../controllers/taskController');
+} = require('../controllers/taskController.js');
 
 // ============================================
 // PROTECT ALL ADMIN Routes
