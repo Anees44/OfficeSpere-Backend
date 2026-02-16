@@ -17,12 +17,12 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 const { uploadMultiple } = require('../config/multer');
 
-// Protect all client routes
+// Protect all client Routes
 router.use(protect);
 router.use(authorize('client'));
 
 // ============================================
-// PROJECT ROUTES
+// PROJECT Routes
 // ============================================
 
 // GET all client projects, POST create project with files
@@ -37,14 +37,14 @@ router.get('/projects/:id', getProject);
 router.post('/projects/:id/upload', uploadMultiple('files', 10), uploadProjectFiles);
 
 // ============================================
-// FEEDBACK ROUTES
+// FEEDBACK Routes
 // ============================================
 
 // Submit feedback for project
 router.post('/projects/:id/feedback', submitFeedback);
 
 // ============================================
-// PROGRESS & ADMIN ROUTES
+// PROGRESS & ADMIN Routes
 // ============================================
 
 // Get project progress

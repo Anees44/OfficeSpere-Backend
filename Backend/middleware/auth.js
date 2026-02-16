@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
 /**
- * Protect routes - Verify JWT token
+ * Protect Routes - Verify JWT token
  * Usage: router.get('/protected', protect, controller)
  */
 const protect = async (req, res, next) => {

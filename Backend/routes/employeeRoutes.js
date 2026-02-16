@@ -1,4 +1,4 @@
-// routes/employeeRoutes.js
+// Routes/employeeRoutes.js
 // All Employee Routes - Dashboard, Profile, Tasks, Projects, Reports, Attendance, Meetings
 
 const express = require('express');
@@ -12,7 +12,7 @@ const attendanceController = require('../controllers/attendanceController');
 const { protect } = require('../middleware/auth');
 const { roleCheck } = require('../middleware/roleCheck');
 
-// All routes are protected and require employee role
+// All Routes are protected and require employee role
 router.use(protect);
 router.use(roleCheck('employee'));
 

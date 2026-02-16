@@ -1,6 +1,6 @@
-// routes/reportRoutes.js
+// Routes/reportRoutes.js
 // ============================================
-// REPORT ROUTES - FULLY ALIGNED WITH FRONTEND
+// REPORT Routes - FULLY ALIGNED WITH FRONTEND
 // ============================================
 
 const express = require("express");
@@ -9,7 +9,7 @@ const { protect, authorize } = require("../middleware/auth");
 const reportController = require("../controllers/reportController");
 
 // ============================================
-// ADMIN REPORT ROUTES
+// ADMIN REPORT Routes
 // Frontend calls: /reports/admin/*
 // ============================================
 
@@ -67,7 +67,7 @@ router.get(
 );
 
 // ============================================
-// CLIENT REPORT ROUTES
+// CLIENT REPORT Routes
 // Frontend calls: /reports/client/*
 // ============================================
 

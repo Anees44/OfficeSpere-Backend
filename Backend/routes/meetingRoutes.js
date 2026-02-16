@@ -1,6 +1,6 @@
-// routes/meetingRoutes.js
+// Routes/meetingRoutes.js
 // ============================================
-// MEETING ROUTES - FULLY ALIGNED WITH FRONTEND
+// MEETING Routes - FULLY ALIGNED WITH FRONTEND
 // ============================================
 
 const express = require('express');
@@ -9,7 +9,7 @@ const { protect, authorize } = require('../middleware/auth');
 const meetingController = require('../controllers/meetingController');
 
 // ============================================
-// ADMIN MEETING ROUTES
+// ADMIN MEETING Routes
 // Frontend calls: /meetings/admin/*
 // ============================================
 
@@ -62,7 +62,7 @@ router.post(
 );
 
 // ============================================
-// EMPLOYEE MEETING ROUTES
+// EMPLOYEE MEETING Routes
 // Frontend calls: /meetings/employee/*
 // ============================================
 
@@ -91,7 +91,7 @@ router.patch(
 );
 
 // ============================================
-// CLIENT MEETING ROUTES
+// CLIENT MEETING Routes
 // Frontend calls: /meetings/client/*
 // ============================================
 

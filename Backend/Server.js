@@ -48,7 +48,7 @@ app.use(cors({
   maxAge: 86400 // 24 hours
 }));
 
-// Handle preflight requests for all routes
+// Handle preflight requests for all Routes
 app.options('*', cors());
 
 // Serve static files (uploaded files)
@@ -96,10 +96,10 @@ app.use(async (req, res, next) => {
 });
 
 // ==========================================
-// ROUTES
+// Routes
 // ==========================================
 
-// Import routes
+// Import Routes
 const adminRoutes = require('./Routes/adminRoutes');
 const attendanceRoutes = require('./Routes/attendanceRoutes');
 const authRoutes = require('./Routes/authRoutes');
@@ -150,7 +150,7 @@ app.get('/', (req, res) => {
 });
 
 // ==========================================
-// MOUNT ROUTES
+// MOUNT Routes
 // ==========================================
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
@@ -161,7 +161,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/tasks', taskRoutes);
 
-// Only mount upload routes if file exists
+// Only mount upload Routes if file exists
 if (uploadRoutes) {
   app.use('/api/upload', uploadRoutes);
 }

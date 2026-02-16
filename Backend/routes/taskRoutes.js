@@ -1,6 +1,6 @@
 // ============================================
 // Task Routes
-// All routes for task operations
+// All Routes for task operations
 // ============================================
 
 const express = require('express');
@@ -25,7 +25,7 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 
 // ============================================
-// EMPLOYEE TASK ROUTES (No admin authorization)
+// EMPLOYEE TASK Routes (No admin authorization)
 // ============================================
 router.get('/employee/my-tasks', protect, authorize('employee'), getMyTasks);
 router.patch('/employee/:id/status', protect, authorize('employee'), updateTaskStatus);
@@ -33,13 +33,13 @@ router.post('/employee/:id/timer/start', protect, authorize('employee'), startTa
 router.post('/employee/:id/timer/stop', protect, authorize('employee'), stopTaskTimer);
 
 // ============================================
-// ADMIN TASK ROUTES
+// ADMIN TASK Routes
 // ============================================
-// Protect all remaining routes with admin authorization
+// Protect all remaining Routes with admin authorization
 router.use(protect);
 router.use(authorize('admin'));
 
-// TASK CRUD ROUTES
+// TASK CRUD Routes
 router.route('/')
   .get(getTasks)
   .post(createTask);
@@ -49,7 +49,7 @@ router.route('/:id')
   .put(updateTask)
   .delete(deleteTask);
 
-// TASK SPECIFIC ROUTES
+// TASK SPECIFIC Routes
 router.post('/:id/assign', assignTask);
 router.get('/stats', getTaskStats);
 router.put('/bulk', bulkUpdateTasks);

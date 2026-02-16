@@ -69,7 +69,7 @@ const upload = multer({
   }
 });
 
-// Protect all upload routes
+// Protect all upload Routes
 router.use(protect);
 
 // @desc    Upload single file

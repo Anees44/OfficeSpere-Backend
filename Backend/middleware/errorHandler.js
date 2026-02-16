@@ -66,7 +66,7 @@ const errorHandler = (err, req, res, next) => {
 
 /**
  * 404 Not Found Handler
- * Place this after all routes
+ * Place this after all Routes
  */
 const notFound = (req, res, next) => {
   const error = new ErrorResponse(

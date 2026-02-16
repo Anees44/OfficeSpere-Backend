@@ -1,4 +1,4 @@
-// routes/adminRoutes.js
+// Routes/adminRoutes.js
 // ✅ FIXED VERSION - Proper route ordering to prevent conflicts
 
 const express = require('express');
@@ -50,32 +50,32 @@ const {
 } = require('../controllers/taskController');
 
 // ============================================
-// PROTECT ALL ADMIN ROUTES
+// PROTECT ALL ADMIN Routes
 // ============================================
 router.use(protect);
 router.use(authorize('admin'));
 
 // ============================================
-// ⚠️ CRITICAL: SPECIFIC ROUTES BEFORE PARAMETERIZED ROUTES
+// ⚠️ CRITICAL: SPECIFIC Routes BEFORE PARAMETERIZED Routes
 // ============================================
 
 // ============================================
-// DASHBOARD ROUTES
+// DASHBOARD Routes
 // ============================================
 router.get('/dashboard', getDashboard);
 
 // ============================================
-// 🔔 NOTIFICATION ROUTES (Specific routes first)
+// 🔔 NOTIFICATION Routes (Specific Routes first)
 // ============================================
-router.patch('/notifications/mark-all-read', markAllRead);  // ✅ Before :id routes
-router.post('/notifications/delete-many', deleteMany);      // ✅ Before :id routes
+router.patch('/notifications/mark-all-read', markAllRead);  // ✅ Before :id Routes
+router.post('/notifications/delete-many', deleteMany);      // ✅ Before :id Routes
 router.get('/notifications', getAdminNotifications);
 router.patch('/notifications/:id/read', markAsRead);
 router.patch('/notifications/:id/unread', markAsUnread);
 router.delete('/notifications/:id', deleteNotification);
 
 // ============================================
-// ✅ ATTENDANCE ROUTE - Place BEFORE employees routes
+// ✅ ATTENDANCE ROUTE - Place BEFORE employees Routes
 // This handles: GET /api/admin/attendance?date=2025-01-31
 // ============================================
 router.get('/attendance', (req, res, next) => {
@@ -89,14 +89,14 @@ router.get('/attendance', (req, res, next) => {
 });
 
 // ============================================
-// SETTINGS ROUTES (Specific routes before parameterized)
+// SETTINGS Routes (Specific Routes before parameterized)
 // ============================================
 router.route('/settings')
   .get(getSettings)
   .put(updateSettings);
 
 // ============================================
-// EMPLOYEE ROUTES
+// EMPLOYEE Routes
 // ============================================
 router.route('/employees')
   .get(getEmployees)
@@ -108,7 +108,7 @@ router.route('/employees/:id')
   .delete(deleteEmployee);
 
 // ============================================
-// CLIENT ROUTES
+// CLIENT Routes
 // ============================================
 router.route('/clients')
   .get(getClients)
@@ -120,7 +120,7 @@ router.route('/clients/:id')
   .delete(deleteClient);
 
 // ============================================
-// PROJECT ROUTES
+// PROJECT Routes
 // ============================================
 router.route('/projects')
   .get(getProjects)
@@ -134,7 +134,7 @@ router.route('/projects/:id')
 router.post('/projects/:id/assign', assignTeam);
 
 // ============================================
-// TASK ROUTES
+// TASK Routes
 // ============================================
 router.route('/tasks')
   .get(getTasks)
@@ -145,6 +145,6 @@ router.route('/tasks/:id')
   .put(updateTask)
   .delete(deleteTask);
 
-console.log('✅ Admin routes registered successfully');
+console.log('✅ Admin Routes registered successfully');
 
 module.exports = router;

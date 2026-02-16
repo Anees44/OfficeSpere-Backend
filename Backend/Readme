@@ -58,7 +58,7 @@ OfficeSphere-backend/
 ├── config/              # Configuration files
 ├── controllers/         # Route controllers
 ├── models/             # Database models
-├── routes/             # API routes
+├── Routes/             # API Routes
 ├── middleware/         # Custom middleware
 ├── utils/              # Utility functions
 ├── uploads/            # File uploads directory

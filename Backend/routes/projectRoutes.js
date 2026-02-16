@@ -18,12 +18,12 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 const { uploadMultiple } = require('../config/multer');
 
-// Protect all project routes
+// Protect all project Routes
 router.use(protect);
 router.use(authorize('admin'));
 
 // ============================================
-// PROJECT CRUD ROUTES
+// PROJECT CRUD Routes
 // ============================================
 
 // GET all projects, POST create project with file upload
@@ -38,7 +38,7 @@ router.route('/:id')
   .delete(deleteProject);
 
 // ============================================
-// PROJECT SPECIFIC ROUTES
+// PROJECT SPECIFIC Routes
 // ============================================
 
 // Assign team to project

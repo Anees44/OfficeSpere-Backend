@@ -1,4 +1,4 @@
-// routes/authRoutes.js
+// Routes/authRoutes.js
 // Authentication Routes
 
 const express = require('express');
@@ -61,7 +61,7 @@ const updatePasswordValidation = [
 ];
 
 // ============================================
-// PUBLIC ROUTES (No authentication required)
+// PUBLIC Routes (No authentication required)
 // ============================================
 
 // @route   POST /api/auth/register
@@ -85,7 +85,7 @@ router.post('/forgot-password', forgotPasswordValidation, validate, forgotPasswo
 router.post('/reset-password', resetPasswordValidation, validate, resetPassword);
 
 // ============================================
-// PROTECTED ROUTES (Authentication required)
+// PROTECTED Routes (Authentication required)
 // ============================================
 
 // @route   POST /api/auth/logout

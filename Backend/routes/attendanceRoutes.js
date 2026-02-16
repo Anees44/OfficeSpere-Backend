@@ -1,5 +1,5 @@
-// routes/attendanceRoutes.js
-// Attendance routes for both admin and employee
+// Routes/attendanceRoutes.js
+// Attendance Routes for both admin and employee
 
 const express = require('express');
 const router = express.Router();
@@ -7,7 +7,7 @@ const attendanceController = require('../controllers/attendanceController');
 const { protect, authorize } = require('../middleware/auth');
 
 // ==========================================
-// ADMIN ROUTES - /api/admin/attendance
+// ADMIN Routes - /api/admin/attendance
 // ==========================================
 
 // @route   GET /api/admin/attendance
@@ -121,7 +121,7 @@ router.get(
 );
 
 // ==========================================
-// EMPLOYEE ROUTES - /api/employee/attendance
+// EMPLOYEE Routes - /api/employee/attendance
 // ==========================================
 
 // @route   POST /api/employee/attendance/checkin
