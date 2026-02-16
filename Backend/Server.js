@@ -1,25 +1,15 @@
-const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const { errorHandler } = require('./middleware/errorHandler');
 const path = require('path');
-const { initializeSocket } = require('./config/socket');
 
 // Load environment variables
 dotenv.config();
 
-// Connect to MongoDB
-connectDB();
-
 // Initialize Express app
 const app = express();
-
-// CREATE HTTP SERVER
-const server = http.createServer(app);
-
-initializeSocket(server);
 
 // Body parser middleware
 app.use(express.json());
@@ -71,6 +61,41 @@ app.use((req, res, next) => {
 });
 
 // ==========================================
+// MONGODB CONNECTION
+// ==========================================
+let isConnected = false;
+
+const ensureDbConnection = async () => {
+  if (isConnected) {
+    console.log('✅ Using existing database connection');
+    return;
+  }
+  
+  try {
+    await connectDB();
+    isConnected = true;
+    console.log('✅ New database connection established');
+  } catch (error) {
+    console.error('❌ Database connection failed:', error.message);
+    throw error;
+  }
+};
+
+// Middleware to ensure DB connection before each request
+app.use(async (req, res, next) => {
+  try {
+    await ensureDbConnection();
+    next();
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Database connection failed',
+      error: error.message
+    });
+  }
+});
+
+// ==========================================
 // ROUTES
 // ==========================================
 
@@ -98,7 +123,8 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: 'OfficeSphere API is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    database: isConnected ? 'Connected' : 'Disconnected'
   });
 });
 
@@ -167,14 +193,19 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 // ==========================================
-// START SERVER (Only for local development)
+// LOCAL DEVELOPMENT SERVER
 // ==========================================
-
-// Vercel handles this in production
 if (process.env.NODE_ENV !== 'production') {
+  const http = require('http');
+  const { initializeSocket } = require('./config/socket');
+  
+  const server = http.createServer(app);
+  initializeSocket(server);
+  
   const PORT = process.env.PORT || 5000;
   
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
+    await ensureDbConnection();
     console.log('==================================================');
     console.log(`🚀 OfficeSphere Backend Server`);
     console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -185,33 +216,27 @@ if (process.env.NODE_ENV !== 'production') {
     console.log(`🔌 Socket.IO: Initialized & Ready`);
     console.log('==================================================');
   });
-}
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err, promise) => {
-  console.log(`❌ Unhandled Rejection: ${err.message}`);
-  if (process.env.NODE_ENV !== 'production') {
+  
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', (err, promise) => {
+    console.log(`❌ Unhandled Rejection: ${err.message}`);
     server.close(() => process.exit(1));
-  }
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.log(`❌ Uncaught Exception: ${err.message}`);
-  if (process.env.NODE_ENV !== 'production') {
+  });
+  
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (err) => {
+    console.log(`❌ Uncaught Exception: ${err.message}`);
     process.exit(1);
-  }
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('👋 SIGTERM received. Shutting down gracefully...');
-  if (server && server.close) {
+  });
+  
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('👋 SIGTERM received. Shutting down gracefully...');
     server.close(() => {
       console.log('✅ Process terminated');
     });
-  }
-});
+  });
+}
 
 // Export for Vercel
 module.exports = app;
