@@ -1,4 +1,3 @@
-
 const http = require('http');
 const express = require('express');
 const cors = require('cors');
@@ -20,46 +19,56 @@ const app = express();
 // CREATE HTTP SERVER
 const server = http.createServer(app);
 
-
 initializeSocket(server);
 
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS configuration
+// ==========================================
+// CORS CONFIGURATION - VERCEL FIX
+// ==========================================
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'https://office-sphere-frontend.vercel.app',
-  process.env.FRONTEND_URL?.replace(/\/$/, '')
+  process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, Postman)
+    console.log('🔍 Origin:', origin);
+    
+    // Allow requests with no origin (mobile apps, Postman, server-to-server)
     if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ Origin allowed:', origin);
       return callback(null, true);
     }
+    
+    console.log('❌ Origin blocked:', origin);
     return callback(new Error('CORS not allowed: ' + origin));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400 // 24 hours
 }));
 
+// Handle preflight requests for all routes
 app.options('*', cors());
+
 // Serve static files (uploaded files)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Request logging in development
-if (process.env.NODE_ENV === 'development') {
-  app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path}`);
-    next();
-  });
-}
+// Request logging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
 
 // ==========================================
 // ROUTES
@@ -88,8 +97,8 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'OfficeSphere API is running',
-    socket: io ? 'Connected' : 'Not Connected',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
@@ -98,7 +107,7 @@ app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to OfficeSphere API',
     version: '1.0.0',
-    socket: 'Real-time updates enabled',
+    status: 'online',
     endpoints: {
       auth: '/api/auth',
       admin: '/api/admin',
@@ -158,41 +167,51 @@ app.use((req, res) => {
 app.use(errorHandler);
 
 // ==========================================
-// START SERVER
+// START SERVER (Only for local development)
 // ==========================================
 
-const PORT = process.env.PORT || 5000;
-
-server.listen(PORT, () => {
-  console.log('==================================================');
-  console.log(`🚀 OfficeSphere Backend Server`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 Server running on port ${PORT}`);
-  console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
-  console.log(`📁 Static files: http://localhost:${PORT}/uploads`);
-  console.log(`📊 MongoDB: Connected`);
-  console.log(`🔌 Socket.IO: Initialized & Ready`);
-  console.log('==================================================');
-});
+// Vercel handles this in production
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 5000;
+  
+  server.listen(PORT, () => {
+    console.log('==================================================');
+    console.log(`🚀 OfficeSphere Backend Server`);
+    console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🌐 Server running on port ${PORT}`);
+    console.log(`🔗 API Base URL: http://localhost:${PORT}/api`);
+    console.log(`📁 Static files: http://localhost:${PORT}/uploads`);
+    console.log(`📊 MongoDB: Connected`);
+    console.log(`🔌 Socket.IO: Initialized & Ready`);
+    console.log('==================================================');
+  });
+}
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
   console.log(`❌ Unhandled Rejection: ${err.message}`);
-  server.close(() => process.exit(1));
+  if (process.env.NODE_ENV !== 'production') {
+    server.close(() => process.exit(1));
+  }
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.log(`❌ Uncaught Exception: ${err.message}`);
-  process.exit(1);
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  }
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('👋 SIGTERM received. Shutting down gracefully...');
-  server.close(() => {
-    console.log('✅ Process terminated');
-  });
+  if (server && server.close) {
+    server.close(() => {
+      console.log('✅ Process terminated');
+    });
+  }
 });
 
+// Export for Vercel
 module.exports = app;

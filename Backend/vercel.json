@@ -8,8 +8,19 @@
   ],
   "routes": [
     {
+      "src": "/api/(.*)",
+      "dest": "Server.js"
+    },
+    {
+      "src": "/uploads/(.*)",
+      "dest": "Server.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "Server.js"
     }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
 }
