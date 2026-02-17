@@ -964,6 +964,65 @@ const getClient = async (req, res) => {
     });
   }
 };
+const getClientWithProjects = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const client = await Client.findById(id)
+      .populate('userId', 'name email phone isActive createdAt');
+
+    if (!client) {
+      return res.status(404).json({ success: false, message: 'Client not found' });
+    }
+
+    // Fetch all projects belonging to this client
+    const projects = await Project.find({ client: client._id })
+      .select('name description status priority budget spent startDate endDate progress milestones tags createdAt')
+      .sort({ createdAt: -1 });
+
+    const totalBudget = projects.reduce((sum, p) => sum + (p.budget || 0), 0);
+    const totalSpent  = projects.reduce((sum, p) => sum + (p.spent  || 0), 0);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        client: {
+          _id: client._id,
+          clientId: client.clientId,
+          companyName: client.companyName,
+          companyEmail: client.companyEmail,
+          industry: client.industry,
+          companySize: client.companySize,
+          companyWebsite: client.companyWebsite,
+          address: client.address,
+          contactPerson: client.contactPerson,
+          isActive: client.isActive,
+          createdAt: client.createdAt,
+          user: {
+            name: client.userId?.name,
+            email: client.userId?.email,
+            phone: client.userId?.phone,
+            isActive: client.userId?.isActive,
+            createdAt: client.userId?.createdAt,
+          },
+        },
+        projects,
+        summary: {
+          totalProjects: projects.length,
+          totalBudget,
+          totalSpent,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('❌ getClientWithProjects error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching client details',
+      error: error.message,
+    });
+  }
+};
 
 const addClient = async (req, res) => {
   try {
@@ -1792,6 +1851,7 @@ module.exports = {
   updateEmployee,
   deleteEmployee,
   getClients,
+  getClientWithProjects,
   getClient,
   addClient,
   updateClient,

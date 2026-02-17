@@ -14,6 +14,7 @@ const {
   updateEmployee,
   deleteEmployee,
   getClients,
+  getClientWithProjects,
   getClient,
   addClient,
   updateClient,
@@ -101,14 +102,19 @@ router.route('/employees/:id')
 
 // ============================================
 // CLIENT Routes
+// ✅ RULE: Specific/longer paths BEFORE short :id paths
 // ============================================
 router.route('/clients')
   .get(getClients)
   .post(addClient);
 
-// ✅ CRITICAL: Specific routes BEFORE parameterized :id routes
-router.put('/clients/:id/approve', approveClient);  // ✅ Approve/Reject client
+// ✅ 1. MOST SPECIFIC first — /clients/:id/details
+router.get('/clients/:id/details', getClientWithProjects);
 
+// ✅ 2. THEN approve (also specific)
+router.put('/clients/:id/approve', approveClient);
+
+// ✅ 3. LAST — generic :id CRUD (catches everything else)
 router.route('/clients/:id')
   .get(getClient)
   .put(updateClient)
