@@ -21,7 +21,12 @@ const {
   getProjects,
   getSettings,
   updateSettings,
-  getDailyAttendance  // ✅ Import attendance function
+  getDailyAttendance,
+  approveClient,
+  updateProgress,
+  deliverProject,
+  respondToFeedback,
+  getAllFeedback
 } = require('../controllers/adminController.js');
 
 const {
@@ -56,40 +61,27 @@ router.use(protect);
 router.use(authorize('admin'));
 
 // ============================================
-// ⚠️ CRITICAL: SPECIFIC Routes BEFORE PARAMETERIZED Routes
-// ============================================
-
-// ============================================
 // DASHBOARD Routes
 // ============================================
 router.get('/dashboard', getDashboard);
 
 // ============================================
-// 🔔 NOTIFICATION Routes (Specific Routes first)
+// NOTIFICATION Routes (Specific Routes first)
 // ============================================
-router.patch('/notifications/mark-all-read', markAllRead);  // ✅ Before :id Routes
-router.post('/notifications/delete-many', deleteMany);      // ✅ Before :id Routes
+router.patch('/notifications/mark-all-read', markAllRead);
+router.post('/notifications/delete-many', deleteMany);
 router.get('/notifications', getAdminNotifications);
 router.patch('/notifications/:id/read', markAsRead);
 router.patch('/notifications/:id/unread', markAsUnread);
 router.delete('/notifications/:id', deleteNotification);
 
 // ============================================
-// ✅ ATTENDANCE ROUTE - Place BEFORE employees Routes
-// This handles: GET /api/admin/attendance?date=2025-01-31
+// ATTENDANCE ROUTE
 // ============================================
-router.get('/attendance', (req, res, next) => {
-  console.log('====================================');
-  console.log('🎯 ADMIN ATTENDANCE ROUTE HIT!');
-  console.log('Full URL:', req.originalUrl);
-  console.log('Query params:', req.query);
-  console.log('Method:', req.method);
-  console.log('====================================');
-  getDailyAttendance(req, res, next);
-});
+router.get('/attendance', getDailyAttendance);
 
 // ============================================
-// SETTINGS Routes (Specific Routes before parameterized)
+// SETTINGS Routes
 // ============================================
 router.route('/settings')
   .get(getSettings)
@@ -114,6 +106,9 @@ router.route('/clients')
   .get(getClients)
   .post(addClient);
 
+// ✅ CRITICAL: Specific routes BEFORE parameterized :id routes
+router.put('/clients/:id/approve', approveClient);  // ✅ Approve/Reject client
+
 router.route('/clients/:id')
   .get(getClient)
   .put(updateClient)
@@ -122,6 +117,8 @@ router.route('/clients/:id')
 // ============================================
 // PROJECT Routes
 // ============================================
+router.get('/projects/feedback/all', getAllFeedback); // ✅ Specific before :id
+
 router.route('/projects')
   .get(getProjects)
   .post(createProject);
@@ -132,6 +129,9 @@ router.route('/projects/:id')
   .delete(deleteProject);
 
 router.post('/projects/:id/assign', assignTeam);
+router.put('/projects/:id/progress', updateProgress);
+router.post('/projects/:id/deliver', deliverProject);
+router.put('/projects/:id/feedback/:feedbackId', respondToFeedback);
 
 // ============================================
 // TASK Routes

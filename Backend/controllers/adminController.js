@@ -9,6 +9,255 @@ const DailyReport = require("../models/DailyReport");
 const Admin = require('../models/Admin');
 const { getIO } = require('../config/socket');
 
+// ============================================
+// CLIENT APPROVAL
+// ============================================
+
+// @desc    Approve/Reject Client
+// @route   PUT /api/admin/clients/:id/approve
+// @access  Private/Admin
+// ============================================
+// SIRF YEH FUNCTION REPLACE KARO adminController.js mein
+// approveClient function - FIXED & COMPLETE
+// ============================================
+
+const approveClient = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { approve, reason } = req.body;
+
+    console.log('🔍 Approve client request:', { id, approve, reason });
+
+    // ✅ Client + User dono populate karo
+    const client = await Client.findById(id).populate('userId', 'name email isActive');
+
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client not found'
+      });
+    }
+
+    console.log('👤 Client found:', client.clientId, '| User:', client.userId?.email);
+
+    const { sendEmail } = require('../utils/sendEmail');
+
+    if (approve === true || approve === 'true') {
+      // ✅ APPROVE: Dono Client aur User ko active karo
+      client.isActive = true;
+      await client.save();
+
+      await User.findByIdAndUpdate(client.userId._id, { isActive: true });
+
+      console.log('✅ Client & User activated:', client.clientId);
+
+      // ✅ Approval email - professional template
+      try {
+        await sendEmail({
+          to: client.userId.email,
+          subject: '🎉 Account Approved - Welcome to OfficeSphere!',
+          html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="UTF-8">
+              <style>
+                body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+                .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #10b981, #059669); padding: 40px 30px; text-align: center; }
+                .header h1 { color: white; margin: 0; font-size: 28px; }
+                .header p { color: rgba(255,255,255,0.9); margin: 8px 0 0; font-size: 15px; }
+                .body { padding: 35px 30px; }
+                .greeting { font-size: 18px; color: #1f2937; font-weight: 600; margin-bottom: 15px; }
+                .message { color: #4b5563; line-height: 1.7; font-size: 15px; margin-bottom: 20px; }
+                .info-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 20px 0; }
+                .info-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #dcfce7; }
+                .info-row:last-child { border-bottom: none; }
+                .info-label { color: #6b7280; font-size: 14px; }
+                .info-value { color: #111827; font-weight: 600; font-size: 14px; }
+                .btn { display: inline-block; background: #10b981; color: white; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600; margin: 20px 0; }
+                .footer { background: #f9fafb; padding: 20px 30px; text-align: center; color: #9ca3af; font-size: 13px; border-top: 1px solid #e5e7eb; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>✅ Account Approved!</h1>
+                  <p>Your OfficeSphere account is now active</p>
+                </div>
+                <div class="body">
+                  <div class="greeting">Dear ${client.userId.name},</div>
+                  <div class="message">
+                    Great news! Your OfficeSphere account has been reviewed and <strong>approved</strong> by our admin team. 
+                    You can now log in and start managing your projects.
+                  </div>
+                  <div class="info-box">
+                    <div class="info-row">
+                      <span class="info-label">Company</span>
+                      <span class="info-value">${client.companyName}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">Client ID</span>
+                      <span class="info-value">${client.clientId}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">Email</span>
+                      <span class="info-value">${client.userId.email}</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">Status</span>
+                      <span class="info-value" style="color: #10b981;">Active ✓</span>
+                    </div>
+                  </div>
+                  <div class="message">
+                    You can now:<br>
+                    • View and track your projects<br>
+                    • Submit new project requests<br>
+                    • Attend meetings with our team<br>
+                    • Access detailed reports
+                  </div>
+                  <center>
+                    <a href="${process.env.FRONTEND_URL}/login" class="btn">
+                      Login to Dashboard →
+                    </a>
+                  </center>
+                </div>
+                <div class="footer">
+                  <p>Thank you for choosing OfficeSphere!</p>
+                  <p>If you need help, contact us at support@officesphere.com</p>
+                </div>
+              </div>
+            </body>
+            </html>
+          `
+        });
+        console.log('📧 Approval email sent to:', client.userId.email);
+      } catch (emailError) {
+        console.error('❌ Email send error:', emailError.message);
+        // Email fail ho bhi to response success dena hai
+      }
+
+      // ✅ Socket notification
+      try {
+        const io = getIO();
+        io.to(`client-${client._id}`).emit('account-approved', {
+          message: 'Your account has been approved! You can now login.',
+          clientId: client.clientId,
+          companyName: client.companyName
+        });
+        // Admin room ko bhi update karo
+        io.to('admin').emit('client-status-changed', {
+          clientId: client._id,
+          status: 'active'
+        });
+      } catch (socketError) {
+        console.error('Socket error:', socketError.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Client "${client.companyName}" approved successfully. Email sent to ${client.userId.email}`,
+        data: {
+          _id: client._id,
+          clientId: client.clientId,
+          companyName: client.companyName,
+          isActive: true,
+          status: 'active'
+        }
+      });
+
+    } else {
+      // ❌ REJECT: Client inactive rakhna, par user account delete karna optional
+      client.isActive = false;
+      await client.save();
+
+      // User bhi inactive rakho
+      await User.findByIdAndUpdate(client.userId._id, { isActive: false });
+
+      console.log('❌ Client rejected:', client.clientId);
+
+      // Rejection email
+      try {
+        await sendEmail({
+          to: client.userId.email,
+          subject: 'OfficeSphere - Registration Update',
+          html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="UTF-8">
+              <style>
+                body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
+                .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+                .header { background: linear-gradient(135deg, #6b7280, #4b5563); padding: 40px 30px; text-align: center; }
+                .header h1 { color: white; margin: 0; font-size: 26px; }
+                .body { padding: 35px 30px; }
+                .greeting { font-size: 18px; color: #1f2937; font-weight: 600; margin-bottom: 15px; }
+                .message { color: #4b5563; line-height: 1.7; font-size: 15px; margin-bottom: 20px; }
+                .reason-box { background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 15px 20px; margin: 20px 0; color: #92400e; }
+                .footer { background: #f9fafb; padding: 20px 30px; text-align: center; color: #9ca3af; font-size: 13px; border-top: 1px solid #e5e7eb; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <h1>Registration Update</h1>
+                </div>
+                <div class="body">
+                  <div class="greeting">Dear ${client.userId.name},</div>
+                  <div class="message">
+                    Thank you for your interest in OfficeSphere. After reviewing your registration for 
+                    <strong>${client.companyName}</strong>, we are unable to approve your account at this time.
+                  </div>
+                  ${reason ? `
+                  <div class="reason-box">
+                    <strong>Reason:</strong> ${reason}
+                  </div>
+                  ` : ''}
+                  <div class="message">
+                    If you believe this is a mistake or would like to provide additional information, 
+                    please contact our support team.
+                  </div>
+                </div>
+                <div class="footer">
+                  <p>OfficeSphere Team</p>
+                  <p>support@officesphere.com</p>
+                </div>
+              </div>
+            </body>
+            </html>
+          `
+        });
+        console.log('📧 Rejection email sent to:', client.userId.email);
+      } catch (emailError) {
+        console.error('❌ Email send error:', emailError.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `Client "${client.companyName}" registration declined.`,
+        data: {
+          _id: client._id,
+          clientId: client.clientId,
+          companyName: client.companyName,
+          isActive: false,
+          status: 'inactive'
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Approve client error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error processing approval',
+      error: error.message
+    });
+  }
+};
+// ============================================
+// DASHBOARD
+// ============================================
 
 const getDashboard = async (req, res) => {
   try {
@@ -187,11 +436,8 @@ const getEmployees = async (req, res) => {
 
     console.log(`✅ Found ${employees.length} employees from database`);
 
-    // ✅✅✅ CRITICAL FIX: Include userId in transformed response
     const transformedEmployees = employees.map((employee) => {
       const userData = employee.userId || {};
-
-      // ✅ Extract the userId (User document's _id)
       const userId = userData._id;
 
       if (!userId) {
@@ -200,14 +446,14 @@ const getEmployees = async (req, res) => {
 
       return {
         _id: employee._id,
-        userId: userId,  // ✅✅✅ CRITICAL: This is the User ObjectId for meetings!
+        userId: userId,
         name: userData.name || "No Name",
         email: userData.email || employee.email || "No Email",
         phone: userData.phone || employee.phone || "",
         position: employee.designation || "Employee",
         department: employee.department || "General",
         employeeId: employee.employeeId || "N/A",
-        designation: employee.designation || "Employee",  // ✅ Added for consistency
+        designation: employee.designation || "Employee",
         status: employee.isActive ? "active" : "inactive",
         joinDate: employee.joiningDate || new Date(),
         salary: employee.salary || 0,
@@ -244,7 +490,7 @@ const getEmployees = async (req, res) => {
     console.error('====================================');
     console.error("Get employees error:", error);
     console.error('====================================');
-    
+
     res.status(500).json({
       success: false,
       message: "Error fetching employees",
@@ -346,7 +592,7 @@ const addEmployee = async (req, res) => {
 
     const responseData = {
       _id: populatedEmployee._id,
-      userId: populatedEmployee.userId?._id,  // ✅ Include userId in response
+      userId: populatedEmployee.userId?._id,
       name: populatedEmployee.userId?.name || name,
       email: populatedEmployee.userId?.email || email,
       phone: populatedEmployee.userId?.phone || phone,
@@ -408,7 +654,7 @@ const getEmployee = async (req, res) => {
 
     const employeeData = {
       _id: employee._id,
-      userId: employee.userId?._id,  // ✅ Include userId
+      userId: employee.userId?._id,
       name: employee.userId?.name || "No Name",
       email: employee.userId?.email || "No Email",
       phone: employee.userId?.phone || "",
@@ -519,7 +765,7 @@ const updateEmployee = async (req, res) => {
       message: "Employee updated successfully",
       employee: {
         _id: updatedEmployee._id,
-        userId: updatedEmployee.userId?._id,  // ✅ Include userId
+        userId: updatedEmployee.userId?._id,
         name: updatedEmployee.userId?.name,
         email: updatedEmployee.userId?.email,
         phone: updatedEmployee.userId?.phone,
@@ -575,35 +821,36 @@ const deleteEmployee = async (req, res) => {
 // CLIENT MANAGEMENT
 // ============================================
 
-// ✅✅✅ FIXED VERSION - Returns clients with userId field
+// ============================================
+// SIRF YEH FUNCTION REPLACE KARO adminController.js mein
+// getClients function - FIXED pending detection
+// ============================================
+
 const getClients = async (req, res) => {
   try {
     console.log('====================================');
     console.log('📋 FETCHING ALL CLIENTS FOR ADMIN');
     console.log('====================================');
 
-    const { search, status, page = 1, limit = 10 } = req.query;
+    const { search, status, page = 1, limit = 50 } = req.query;
 
     let query = {};
 
     if (search) {
       query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
         { companyName: { $regex: search, $options: "i" } },
+        { 'contactPerson.name': { $regex: search, $options: "i" } },
+        { 'contactPerson.email': { $regex: search, $options: "i" } },
+        { clientId: { $regex: search, $options: "i" } },
       ];
-    }
-
-    if (status) {
-      query.isActive = status === "active";
     }
 
     const skip = (page - 1) * limit;
     const total = await Client.countDocuments(query);
 
-    // ✅ Fetch clients with userId populated
+    // ✅ CRITICAL FIX: userId ko isActive ke saath populate karo
     const clients = await Client.find(query)
-      .populate("userId", "name email phone role")
+      .populate("userId", "name email phone role isActive")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
@@ -611,21 +858,26 @@ const getClients = async (req, res) => {
 
     console.log(`✅ Found ${clients.length} clients from database`);
 
-    // ✅✅✅ CRITICAL: Transform data to include userId
     const transformedClients = clients.map(client => {
       const userData = client.userId || {};
 
-      // ✅ This userId._id is what we need for meeting participants!
-      const userId = userData._id;
-
-      if (!userId) {
-        console.warn(`⚠️  Client ${client.clientId} has no userId!`);
+      // ✅ FIXED: Pending detection
+      // - Client isActive: false AND User isActive: false = PENDING (awaiting approval)
+      // - Client isActive: true AND User isActive: true = ACTIVE
+      // - Client isActive: false AND User isActive: true = INACTIVE (rejected/deactivated)
+      let clientStatus;
+      if (client.isActive && userData.isActive) {
+        clientStatus = 'active';
+      } else if (!client.isActive && !userData.isActive) {
+        clientStatus = 'pending';  // ✅ Naya register hua, dono inactive
+      } else {
+        clientStatus = 'inactive';
       }
 
       return {
         _id: client._id,
         clientId: client.clientId,
-        userId: userId,  // ✅✅✅ CRITICAL: This is the User ObjectId for meetings!
+        userId: userData._id,
         name: userData.name || client.contactPerson?.name || 'Unknown',
         email: userData.email || client.contactPerson?.email || client.companyEmail || '',
         phone: userData.phone || client.contactPerson?.phone || '',
@@ -635,36 +887,41 @@ const getClients = async (req, res) => {
         industry: client.industry || '',
         companySize: client.companySize || '',
         website: client.companyWebsite || '',
-        isActive: client.isActive !== undefined ? client.isActive : true,
+        isActive: client.isActive,
+        userIsActive: userData.isActive,
+        status: clientStatus,  // ✅ Correct status
         createdAt: client.createdAt,
-        updatedAt: client.updatedAt
+        updatedAt: client.updatedAt,
+        projects: client.projects || [],
+        totalProjects: client.totalProjects || 0,
       };
     });
 
-    console.log('====================================');
-    console.log('✅ Sample transformed client:');
-    if (transformedClients.length > 0) {
-      console.log(JSON.stringify(transformedClients[0], null, 2));
+    // ✅ Filter by status AFTER transformation
+    let filteredClients = transformedClients;
+    if (status && status !== 'all') {
+      filteredClients = transformedClients.filter(c => c.status === status);
     }
-    console.log('====================================');
 
-    // ✅✅✅ CRITICAL: Return with "clients" key (frontend expects this!)
+    console.log('📊 Status breakdown:', {
+      total: transformedClients.length,
+      active: transformedClients.filter(c => c.status === 'active').length,
+      pending: transformedClients.filter(c => c.status === 'pending').length,
+      inactive: transformedClients.filter(c => c.status === 'inactive').length,
+    });
+
     res.status(200).json({
       success: true,
-      count: transformedClients.length,
+      count: filteredClients.length,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit),
-      clients: transformedClients,  // ✅ Frontend expects this key!
+      data: filteredClients,      // ✅ 'data' key use karo (ClientList.jsx expects this)
+      clients: filteredClients,   // ✅ backward compatibility
     });
 
   } catch (error) {
-    console.error('====================================');
-    console.error('❌ GET CLIENTS ERROR');
-    console.error('====================================');
-    console.error("Get clients error:", error);
-    console.error('====================================');
-    
+    console.error('❌ GET CLIENTS ERROR:', error);
     res.status(500).json({
       success: false,
       message: "Error fetching clients",
@@ -785,7 +1042,7 @@ const addClient = async (req, res) => {
 
     const responseData = {
       _id: populatedClient._id,
-      userId: populatedClient.userId?._id,  // ✅ Include userId in response
+      userId: populatedClient.userId?._id,
       name: populatedClient.userId?.name || name,
       email: populatedClient.userId?.email || email,
       phone: populatedClient.userId?.phone || phone,
@@ -1105,12 +1362,6 @@ const getProjects = async (req, res) => {
 // ATTENDANCE
 // ============================================
 
-// @desc    Get daily attendance for admin dashboard & attendance monitor
-// @route   GET /api/admin/attendance
-// @access  Private/Admin
-// ✅✅✅ UPDATED getDailyAttendance Function
-// Now includes full location information for admin display
-
 const getDailyAttendance = async (req, res) => {
   try {
     console.log('====================================');
@@ -1120,7 +1371,6 @@ const getDailyAttendance = async (req, res) => {
 
     const { date } = req.query;
 
-    // ✅ Handle timezone properly
     let queryDate;
     if (date) {
       const [year, month, day] = date.split('-').map(Number);
@@ -1136,14 +1386,12 @@ const getDailyAttendance = async (req, res) => {
     console.log('📅 Query date (UTC):', queryDate.toISOString());
     console.log('📅 Next day (UTC):', nextDay.toISOString());
 
-    // ✅ Get ALL active employees
     const allEmployees = await Employee.find({ isActive: true })
       .populate('userId', 'name email')
       .select('name email employeeId designation department');
 
     console.log('👥 Total active employees:', allEmployees.length);
 
-    // ✅ Get attendance records for this date range
     const attendanceRecords = await Attendance.find({
       date: { $gte: queryDate, $lt: nextDay }
     }).populate({
@@ -1156,7 +1404,6 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('✅ Attendance records found:', attendanceRecords.length);
 
-    // ✅✅✅ CRITICAL FIX: Map employees with FULL LOCATION DATA
     const attendanceData = allEmployees.map(employee => {
       const record = attendanceRecords.find(
         r => r.employeeId && r.employeeId._id.toString() === employee._id.toString()
@@ -1181,7 +1428,6 @@ const getDailyAttendance = async (req, res) => {
           finalStatus = 'absent';
         }
 
-        // ✅✅✅ CRITICAL: Include FULL location information
         console.log('📍 Location data for', employee.userId?.name || employee.name, ':', {
           checkInLocation: record.checkInLocation,
           checkInLocationDetails: record.checkInLocationDetails,
@@ -1204,8 +1450,6 @@ const getDailyAttendance = async (req, res) => {
           totalHours: workHours ? `${workHours}h` : '-',
           status: finalStatus,
           isLate: record.isLate || false,
-          
-          // ✅✅✅ CRITICAL: Include ALL location fields
           checkInLocation: record.checkInLocation,
           checkInLocationDetails: record.checkInLocationDetails || {
             shortName: record.checkInLocation || 'Unknown',
@@ -1217,12 +1461,9 @@ const getDailyAttendance = async (req, res) => {
             postalCode: ''
           },
           checkInCoordinates: record.checkInCoordinates,
-          
-          // ✅ Also provide as "location" for backward compatibility
           location: record.checkInLocation || 'Unknown Location',
         };
       } else {
-        // Employee hasn't checked in
         return {
           _id: null,
           employeeName: employee.userId?.name || employee.name || 'Unknown',
@@ -1246,7 +1487,6 @@ const getDailyAttendance = async (req, res) => {
       }
     });
 
-    // ✅ Calculate statistics
     const stats = {
       total: attendanceData.length,
       present: attendanceData.filter(a =>
@@ -1262,7 +1502,6 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('📊 Stats:', stats);
 
-    // ✅ Sort: Present first, then late, then absent
     const sortedData = attendanceData.sort((a, b) => {
       const statusOrder = { present: 0, late: 1, absent: 2 };
       const aOrder = statusOrder[a.status?.toLowerCase()] ?? 3;
@@ -1277,7 +1516,6 @@ const getDailyAttendance = async (req, res) => {
 
     console.log('====================================');
     console.log('✅ Sending response with', sortedData.length, 'records');
-    console.log('✅ Sample record with location:', sortedData.find(r => r.checkInLocation));
     console.log('====================================');
 
     res.status(200).json({
@@ -1302,14 +1540,12 @@ const getDailyAttendance = async (req, res) => {
     });
   }
 };
+
 // ============================================
-// ADD THESE FUNCTIONS TO projectController.js
+// PROJECT EXTRAS (progress, deliver, feedback)
 // ============================================
 
-// @desc    Update project progress (Admin)
-// @route   PUT /api/admin/projects/:id/progress
-// @access  Private/Admin
-exports.updateProgress = async (req, res) => {
+const updateProgress = async (req, res) => {
   try {
     const { progress } = req.body;
 
@@ -1331,7 +1567,6 @@ exports.updateProgress = async (req, res) => {
 
     project.progress = progress;
 
-    // ✅ Auto-update status based on progress
     if (progress === 100 && project.status !== 'Completed') {
       project.status = 'Completed';
       project.actualEndDate = new Date();
@@ -1346,7 +1581,6 @@ exports.updateProgress = async (req, res) => {
       { path: 'projectManager', select: 'name email' }
     ]);
 
-    // ✅ Notify client of progress update
     try {
       const io = getIO();
       io.to(`client-${project.client._id}`).emit('progress-updated', {
@@ -1377,15 +1611,9 @@ exports.updateProgress = async (req, res) => {
   }
 };
 
-// @desc    Deliver completed project (with files/links)
-// @route   POST /api/admin/projects/:id/deliver
-// @access  Private/Admin
-exports.deliverProject = async (req, res) => {
+const deliverProject = async (req, res) => {
   try {
-    const {
-      deliveryNotes,
-      deliveryLinks
-    } = req.body;
+    const { deliveryNotes, deliveryLinks } = req.body;
 
     const project = await Project.findById(req.params.id);
 
@@ -1396,7 +1624,6 @@ exports.deliverProject = async (req, res) => {
       });
     }
 
-    // ✅ Handle file uploads (delivery files)
     let deliveryFiles = [];
     if (req.files && req.files.length > 0) {
       deliveryFiles = req.files.map(file => ({
@@ -1404,15 +1631,13 @@ exports.deliverProject = async (req, res) => {
         url: `/uploads/projects/${file.filename}`,
         uploadedBy: req.user.id,
         uploadedAt: new Date(),
-        isDelivery: true // ✅ Mark as delivery file
+        isDelivery: true
       }));
       console.log('📦 Delivery files uploaded:', deliveryFiles.length);
     }
 
-    // ✅ Add delivery files to project
     project.files = [...project.files, ...deliveryFiles];
 
-    // ✅ Create deliverable entry
     const deliverable = {
       name: 'Final Delivery',
       description: deliveryNotes || 'Project completed and delivered',
@@ -1423,7 +1648,6 @@ exports.deliverProject = async (req, res) => {
 
     project.deliverables.push(deliverable);
 
-    // ✅ Update project status
     project.status = 'Completed';
     project.progress = 100;
     project.actualEndDate = new Date();
@@ -1435,7 +1659,6 @@ exports.deliverProject = async (req, res) => {
       { path: 'files.uploadedBy', select: 'name email' }
     ]);
 
-    // ✅ Notify client
     try {
       const io = getIO();
       io.to(`client-${project.client._id}`).emit('project-delivered', {
@@ -1444,9 +1667,6 @@ exports.deliverProject = async (req, res) => {
         deliveryFiles: deliveryFiles,
         deliveryNotes: deliveryNotes
       });
-
-      // ✅ Send email notification (optional)
-      // await sendDeliveryEmail(project.client.email, project.name, deliveryNotes);
     } catch (socketError) {
       console.error('Socket emit error:', socketError);
     }
@@ -1469,10 +1689,7 @@ exports.deliverProject = async (req, res) => {
   }
 };
 
-// @desc    Respond to client feedback
-// @route   PUT /api/admin/projects/:id/feedback/:feedbackId
-// @access  Private/Admin
-exports.respondToFeedback = async (req, res) => {
+const respondToFeedback = async (req, res) => {
   try {
     const { response } = req.body;
 
@@ -1503,7 +1720,6 @@ exports.respondToFeedback = async (req, res) => {
 
     await project.populate('feedback.respondedBy', 'name email');
 
-    // ✅ Notify client
     try {
       const io = getIO();
       io.to(`client-${project.client}`).emit('feedback-responded', {
@@ -1530,10 +1746,7 @@ exports.respondToFeedback = async (req, res) => {
   }
 };
 
-// @desc    Get all feedback for admin
-// @route   GET /api/admin/feedback
-// @access  Private/Admin
-exports.getAllFeedback = async (req, res) => {
+const getAllFeedback = async (req, res) => {
   try {
     const projects = await Project.find({ 'feedback.0': { $exists: true } })
       .populate('client', 'name companyName email')
@@ -1567,6 +1780,7 @@ exports.getAllFeedback = async (req, res) => {
     });
   }
 };
+
 // ============================================
 // EXPORTS
 // ============================================
@@ -1585,5 +1799,10 @@ module.exports = {
   getProjects,
   getSettings,
   updateSettings,
-  getDailyAttendance
+  getDailyAttendance,
+  approveClient,
+  updateProgress,
+  deliverProject,
+  respondToFeedback,
+  getAllFeedback
 };
