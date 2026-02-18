@@ -224,4 +224,116 @@ router.get(
   attendanceController.getTodayAttendance
 );
 
+// ✅ ADD THESE NEW ROUTES TO YOUR attendanceRoutes.js
+
+// ==========================================
+// EMPLOYEE ROUTES - ADD THESE NEW ROUTES
+// ==========================================
+
+// @route   POST /api/employee/attendance/request
+// @desc    Submit attendance request (half-day, leave, remote)
+// @access  Employee
+router.post(
+  '/employee/attendance/request',
+  protect,
+  authorize('employee'),
+  attendanceController.submitAttendanceRequest
+);
+
+// @route   GET /api/employee/attendance/holiday/check
+// @desc    Check if today is a holiday
+// @access  Employee
+router.get(
+  '/employee/attendance/holiday/check',
+  protect,
+  authorize('employee'),
+  attendanceController.checkTodayHoliday
+);
+
+// @route   GET /api/employee/holidays
+// @desc    Get holidays list
+// @access  Employee
+router.get(
+  '/employee/holidays',
+  protect,
+  authorize('employee'),
+  attendanceController.getHolidays
+);
+
+// ==========================================
+// ADMIN ROUTES - ADD THESE NEW ROUTES
+// ==========================================
+
+// @route   GET /api/admin/attendance/requests/pending
+// @desc    Get pending attendance requests (half-day, leave)
+// @access  Admin
+router.get(
+  '/admin/attendance/requests/pending',
+  protect,
+  authorize('admin'),
+  attendanceController.getPendingAttendanceRequests
+);
+
+// @route   PUT /api/admin/attendance/request/:id/approve
+// @desc    Approve attendance request
+// @access  Admin
+router.put(
+  '/admin/attendance/request/:id/approve',
+  protect,
+  authorize('admin'),
+  attendanceController.approveAttendanceRequest
+);
+
+// @route   PUT /api/admin/attendance/request/:id/reject
+// @desc    Reject attendance request
+// @access  Admin
+router.put(
+  '/admin/attendance/request/:id/reject',
+  protect,
+  authorize('admin'),
+  attendanceController.rejectAttendanceRequest
+);
+
+// ==================== HOLIDAY MANAGEMENT ROUTES ====================
+
+// @route   POST /api/admin/holidays
+// @desc    Create holiday
+// @access  Admin
+router.post(
+  '/admin/holidays',
+  protect,
+  authorize('admin'),
+  attendanceController.createHoliday
+);
+
+// @route   GET /api/admin/holidays
+// @desc    Get all holidays
+// @access  Admin
+router.get(
+  '/admin/holidays',
+  protect,
+  authorize('admin'),
+  attendanceController.getHolidaysAdmin
+);
+
+// @route   PUT /api/admin/holidays/:id
+// @desc    Update holiday
+// @access  Admin
+router.put(
+  '/admin/holidays/:id',
+  protect,
+  authorize('admin'),
+  attendanceController.updateHoliday
+);
+
+// @route   DELETE /api/admin/holidays/:id
+// @desc    Delete holiday
+// @access  Admin
+router.delete(
+  '/admin/holidays/:id',
+  protect,
+  authorize('admin'),
+  attendanceController.deleteHoliday
+);
+
 module.exports = router;

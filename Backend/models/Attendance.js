@@ -1,3 +1,6 @@
+// ✅ UPDATED Attendance Model with Half-Day, Leave, Remote, Holiday Support
+// Replace your existing attendanceSchema with this:
+
 const mongoose = require("mongoose");
 
 const attendanceSchema = new mongoose.Schema(
@@ -11,18 +14,47 @@ const attendanceSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    
+    // ✅ NEW: Attendance Type
+    type: {
+      type: String,
+      enum: ["full-day", "half-day", "leave", "remote"],
+      default: "full-day"
+    },
+    
+    // ✅ NEW: Request Status (for half-day and leave)
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "present", "absent", "late", "leave", "half-day", "work-from-home"],
+      default: "present",
+    },
+    
+    // ✅ NEW: Reason for leave/half-day
+    reason: {
+      type: String,
+      trim: true
+    },
+    
+    // ✅ NEW: Approved by admin
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User"
+    },
+    
+    approvedAt: {
+      type: Date
+    },
+    
     checkInTime: {
       type: Date,
     },
-    // ✅ FIXED: Remove enum restriction to allow any location name
     checkInLocation: {
       type: String,
       default: "Remote",
     },
-    // ✅ NEW: Detailed location information
     checkInLocationDetails: {
-      shortName: { type: String }, // e.g., "Gulshan-e-Iqbal, Karachi"
-      fullAddress: { type: String }, // Full formatted address
+      shortName: { type: String },
+      fullAddress: { type: String },
       city: { type: String },
       state: { type: String },
       country: { type: String },
@@ -38,17 +70,16 @@ const attendanceSchema = new mongoose.Schema(
     checkInDeviceInfo: String,
     checkInMethod: {
       type: String,
-      enum: ["Auto", "Manual", "QR Code", "WiFi", "Bluetooth"],
-      default: "Manual",
+      enum: ["auto", "manual", "remote", "qr-code", "wifi", "bluetooth"],
+      default: "manual",
     },
+    
     checkOutTime: {
       type: Date,
     },
-    // ✅ FIXED: Remove enum restriction for checkout location too
     checkOutLocation: {
       type: String,
     },
-    // ✅ NEW: Detailed checkout location information
     checkOutLocationDetails: {
       shortName: { type: String },
       fullAddress: { type: String },
@@ -67,29 +98,18 @@ const attendanceSchema = new mongoose.Schema(
     checkOutDeviceInfo: String,
     checkOutMethod: {
       type: String,
-      enum: ["Auto", "Manual", "QR Code", "WiFi", "Bluetooth"],
+      enum: ["auto", "manual", "remote", "qr-code", "wifi", "bluetooth"],
     },
-    status: {
-      type: String,
-      enum: [
-        "present",
-        "absent",
-        "late",
-        "leave",
-        "half-day",
-        "work-from-home",
-      ],
-      default: "present",
-    },
+    
     workHours: {
       type: Number,
-      default: 0, // in hours
+      default: 0,
     },
     breaks: [
       {
         startTime: Date,
         endTime: Date,
-        duration: Number, // in minutes
+        duration: Number,
         type: {
           type: String,
           enum: ["Lunch", "Tea", "Other"],
@@ -99,11 +119,11 @@ const attendanceSchema = new mongoose.Schema(
     ],
     totalBreakTime: {
       type: Number,
-      default: 0, // in minutes
+      default: 0,
     },
     productiveHours: {
       type: Number,
-      default: 0, // work hours - break time
+      default: 0,
     },
     isLate: {
       type: Boolean,
@@ -111,7 +131,7 @@ const attendanceSchema = new mongoose.Schema(
     },
     lateBy: {
       type: Number,
-      default: 0, // in minutes
+      default: 0,
     },
     earlyLeave: {
       type: Boolean,
@@ -119,13 +139,14 @@ const attendanceSchema = new mongoose.Schema(
     },
     earlyBy: {
       type: Number,
-      default: 0, // in minutes
+      default: 0,
     },
     notes: {
       type: String,
       trim: true,
     },
-    // Correction Request (embedded)
+    
+    // Correction Request
     correctionRequest: {
       requestedBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -147,7 +168,8 @@ const attendanceSchema = new mongoose.Schema(
       requestedAt: Date,
       adminNotes: String,
     },
-    // Leave Request (embedded)
+    
+    // Leave Request (kept for backwards compatibility)
     leaveRequest: {
       leaveType: {
         type: String,
@@ -167,6 +189,7 @@ const attendanceSchema = new mongoose.Schema(
       requestedAt: Date,
       adminNotes: String,
     },
+    
     isActive: {
       type: Boolean,
       default: true,
@@ -177,10 +200,11 @@ const attendanceSchema = new mongoose.Schema(
   },
 );
 
-// Compound index for employee + date (unique attendance per day)
+// Indexes
 attendanceSchema.index({ employeeId: 1, date: 1 }, { unique: true });
 attendanceSchema.index({ date: 1 });
 attendanceSchema.index({ status: 1 });
+attendanceSchema.index({ type: 1 });
 
 // Calculate working hours on save
 attendanceSchema.pre("save", function (next) {
@@ -188,8 +212,6 @@ attendanceSchema.pre("save", function (next) {
     const diffMs = this.checkOutTime - this.checkInTime;
     const hours = diffMs / (1000 * 60 * 60);
     this.workHours = Math.round(hours * 100) / 100;
-
-    // Calculate productive hours (working hours - breaks)
     this.productiveHours = this.workHours - (this.totalBreakTime / 60);
   }
   next();
