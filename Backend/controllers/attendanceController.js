@@ -1664,5 +1664,608 @@ exports.exportAttendance = async (req, res) => {
     });
   }
 };
+// ✅ ADD THESE NEW FUNCTIONS TO YOUR attendanceController.js
+
+const Holiday = require('../models/Holiday');
+
+// ==================== NEW ATTENDANCE REQUEST FUNCTIONS ====================
+
+// @desc    Submit attendance request (half-day, leave, remote)
+// @route   POST /api/employee/attendance/request
+// @access  Private (Employee)
+exports.submitAttendanceRequest = async (req, res) => {
+  try {
+    console.log('====================================');
+    console.log('📝 ATTENDANCE REQUEST SUBMISSION');
+    console.log('====================================');
+    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
+
+    const { type, reason, timestamp, employeeName, email, status } = req.body;
+    const userId = req.user._id || req.user.id;
+
+    // Validate required fields
+    if (!type || !reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'Type and reason are required'
+      });
+    }
+
+    // Validate type
+    if (!['half-day', 'leave', 'remote'].includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid attendance type'
+      });
+    }
+
+    // Find employee
+    const employee = await Employee.findOne({ userId });
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee profile not found'
+      });
+    }
+
+    console.log('✅ Employee found:', employee.name);
+
+    // Get today's date in PKT
+    const todayStart = getPKTDate();
+    const todayEnd = getEndOfDayPKT();
+
+    // Check if already has attendance for today
+    const existingAttendance = await Attendance.findOne({
+      employeeId: employee._id,
+      date: {
+        $gte: todayStart,
+        $lte: todayEnd
+      }
+    });
+
+    if (existingAttendance && existingAttendance.checkInTime) {
+      return res.status(400).json({
+        success: false,
+        message: 'Already marked attendance for today'
+      });
+    }
+
+    // Create attendance request
+    const attendanceData = {
+      employeeId: employee._id,
+      date: todayStart,
+      type: type,
+      reason: reason,
+      status: type === 'remote' ? 'approved' : 'pending', // Remote is auto-approved
+      notes: `${type} request - ${reason}`,
+      checkInTime: type === 'remote' ? new Date(timestamp || Date.now()) : null,
+      checkInMethod: type === 'remote' ? 'remote' : null,
+      checkInLocation: type === 'remote' ? 'Remote Work - Home' : null
+    };
+
+    console.log('📦 Attendance data:', attendanceData);
+
+    let attendance;
+    if (existingAttendance) {
+      attendance = await Attendance.findByIdAndUpdate(
+        existingAttendance._id,
+        attendanceData,
+        { new: true }
+      );
+    } else {
+      attendance = await Attendance.create(attendanceData);
+    }
+
+    console.log('✅ Attendance request created:', attendance._id);
+
+    // Create notification for admin
+    try {
+      const Notification = require('../models/Notification');
+      await Notification.create({
+        title: `${type === 'half-day' ? 'Half Day' : type === 'leave' ? 'Leave' : 'Remote Work'} Request`,
+        message: `${employeeName || employee.name} has requested ${type}. Reason: ${reason}`,
+        type: 'attendance',
+        role: 'admin',
+        isRead: false,
+        metadata: {
+          employeeId: employee._id,
+          employeeName: employeeName || employee.name,
+          attendanceType: type,
+          reason: reason,
+          status: 'pending',
+          attendanceId: attendance._id
+        }
+      });
+      console.log('📬 Notification created for admin');
+    } catch (notifError) {
+      console.error('⚠️ Notification creation error:', notifError);
+    }
+
+    // Emit socket event
+    try {
+      const io = getIO();
+      io.to('admin').emit('attendance-request', {
+        employeeId: employee._id,
+        employeeName: employeeName || employee.name,
+        type: type,
+        reason: reason,
+        date: attendance.date,
+        status: 'pending'
+      });
+      console.log('📡 Socket event emitted');
+    } catch (socketError) {
+      console.error('⚠️ Socket error:', socketError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `${type} request submitted successfully`,
+      data: attendance
+    });
+
+  } catch (error) {
+    console.error('❌ Submit attendance request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Check if today is a holiday
+// @route   GET /api/employee/attendance/holiday/check
+// @access  Private (Employee)
+exports.checkTodayHoliday = async (req, res) => {
+  try {
+    console.log('====================================');
+    console.log('🎉 CHECK TODAY HOLIDAY');
+    console.log('====================================');
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const holiday = await Holiday.findOne({
+      date: {
+        $gte: today,
+        $lt: tomorrow
+      },
+      isActive: true
+    }).populate('declaredBy', 'name');
+
+    if (holiday) {
+      console.log('🎉 Holiday found:', holiday.name);
+      return res.status(200).json({
+        success: true,
+        isHoliday: true,
+        holiday: {
+          name: holiday.name,
+          description: holiday.description,
+          type: holiday.type,
+          date: holiday.date,
+          declaredBy: holiday.declaredBy?.name || 'Admin'
+        }
+      });
+    }
+
+    console.log('⭕ No holiday today');
+    res.status(200).json({
+      success: true,
+      isHoliday: false,
+      holiday: null
+    });
+
+  } catch (error) {
+    console.error('❌ Check holiday error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get holidays list
+// @route   GET /api/employee/holidays
+// @access  Private (Employee)
+exports.getHolidays = async (req, res) => {
+  try {
+    const { year, month } = req.query;
+    
+    const currentYear = year ? parseInt(year) : new Date().getFullYear();
+    
+    const query = {
+      year: currentYear,
+      isActive: true
+    };
+
+    if (month) {
+      const monthNum = parseInt(month) - 1;
+      const startDate = new Date(currentYear, monthNum, 1);
+      const endDate = new Date(currentYear, monthNum + 1, 0);
+      
+      query.date = {
+        $gte: startDate,
+        $lte: endDate
+      };
+    }
+
+    const holidays = await Holiday.find(query)
+      .sort({ date: 1 })
+      .populate('declaredBy', 'name');
+
+    res.status(200).json({
+      success: true,
+      data: holidays,
+      count: holidays.length
+    });
+
+  } catch (error) {
+    console.error('Get holidays error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ==================== ADMIN FUNCTIONS ====================
+
+// @desc    Get pending attendance requests
+// @route   GET /api/admin/attendance/requests/pending
+// @access  Private (Admin)
+exports.getPendingAttendanceRequests = async (req, res) => {
+  try {
+    const { page = 1, limit = 20 } = req.query;
+
+    const requests = await Attendance.find({
+      status: 'pending',
+      type: { $in: ['half-day', 'leave'] }
+    })
+      .populate({
+        path: 'employeeId',
+        populate: {
+          path: 'userId',
+          select: 'name email'
+        }
+      })
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const count = await Attendance.countDocuments({
+      status: 'pending',
+      type: { $in: ['half-day', 'leave'] }
+    });
+
+    res.status(200).json({
+      success: true,
+      data: requests,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        pages: Math.ceil(count / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get pending requests error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Approve attendance request
+// @route   PUT /api/admin/attendance/request/:id/approve
+// @access  Private (Admin)
+exports.approveAttendanceRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminNotes } = req.body;
+    const adminId = req.user._id || req.user.id;
+
+    const attendance = await Attendance.findById(id)
+      .populate('employeeId');
+
+    if (!attendance) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attendance request not found'
+      });
+    }
+
+    if (attendance.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Request has already been processed'
+      });
+    }
+
+    attendance.status = 'approved';
+    attendance.approvedBy = adminId;
+    attendance.approvedAt = new Date();
+    
+    if (adminNotes) {
+      attendance.notes = (attendance.notes || '') + ` | Admin: ${adminNotes}`;
+    }
+
+    await attendance.save();
+
+    // Create notification for employee
+    try {
+      const Notification = require('../models/Notification');
+      await Notification.create({
+        title: `${attendance.type} Request Approved`,
+        message: `Your ${attendance.type} request has been approved by admin`,
+        type: 'attendance',
+        userId: attendance.employeeId.userId,
+        role: 'employee',
+        isRead: false
+      });
+    } catch (notifError) {
+      console.error('⚠️ Notification error:', notifError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Request approved successfully',
+      data: attendance
+    });
+
+  } catch (error) {
+    console.error('Approve request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Reject attendance request
+// @route   PUT /api/admin/attendance/request/:id/reject
+// @access  Private (Admin)
+exports.rejectAttendanceRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminNotes } = req.body;
+    const adminId = req.user._id || req.user.id;
+
+    if (!adminNotes) {
+      return res.status(400).json({
+        success: false,
+        message: 'Admin notes are required for rejection'
+      });
+    }
+
+    const attendance = await Attendance.findById(id)
+      .populate('employeeId');
+
+    if (!attendance) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attendance request not found'
+      });
+    }
+
+    if (attendance.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Request has already been processed'
+      });
+    }
+
+    attendance.status = 'rejected';
+    attendance.approvedBy = adminId;
+    attendance.approvedAt = new Date();
+    attendance.notes = (attendance.notes || '') + ` | Admin rejected: ${adminNotes}`;
+
+    await attendance.save();
+
+    // Create notification for employee
+    try {
+      const Notification = require('../models/Notification');
+      await Notification.create({
+        title: `${attendance.type} Request Rejected`,
+        message: `Your ${attendance.type} request has been rejected. Reason: ${adminNotes}`,
+        type: 'attendance',
+        userId: attendance.employeeId.userId,
+        role: 'employee',
+        isRead: false
+      });
+    } catch (notifError) {
+      console.error('⚠️ Notification error:', notifError);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Request rejected',
+      data: attendance
+    });
+
+  } catch (error) {
+    console.error('Reject request error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// ==================== HOLIDAY MANAGEMENT (ADMIN) ====================
+
+// @desc    Create holiday
+// @route   POST /api/admin/holidays
+// @access  Private (Admin)
+exports.createHoliday = async (req, res) => {
+  try {
+    const { name, date, description, type } = req.body;
+    const adminId = req.user._id || req.user.id;
+
+    if (!name || !date) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name and date are required'
+      });
+    }
+
+    const holidayDate = new Date(date);
+    const year = holidayDate.getFullYear();
+
+    const holiday = await Holiday.create({
+      name,
+      date: holidayDate,
+      description,
+      type: type || 'company',
+      declaredBy: adminId,
+      year
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Holiday created successfully',
+      data: holiday
+    });
+
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Holiday already exists for this date'
+      });
+    }
+    
+    console.error('Create holiday error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get all holidays
+// @route   GET /api/admin/holidays
+// @access  Private (Admin)
+exports.getHolidaysAdmin = async (req, res) => {
+  try {
+    const { year, page = 1, limit = 50 } = req.query;
+    
+    const currentYear = year ? parseInt(year) : new Date().getFullYear();
+    
+    const query = { year: currentYear };
+
+    const holidays = await Holiday.find(query)
+      .populate('declaredBy', 'name email')
+      .sort({ date: 1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const count = await Holiday.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: holidays,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        pages: Math.ceil(count / limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Get holidays error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Update holiday
+// @route   PUT /api/admin/holidays/:id
+// @access  Private (Admin)
+exports.updateHoliday = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, date, description, type, isActive } = req.body;
+
+    const holiday = await Holiday.findById(id);
+
+    if (!holiday) {
+      return res.status(404).json({
+        success: false,
+        message: 'Holiday not found'
+      });
+    }
+
+    if (name) holiday.name = name;
+    if (date) {
+      holiday.date = new Date(date);
+      holiday.year = new Date(date).getFullYear();
+    }
+    if (description !== undefined) holiday.description = description;
+    if (type) holiday.type = type;
+    if (isActive !== undefined) holiday.isActive = isActive;
+
+    await holiday.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Holiday updated successfully',
+      data: holiday
+    });
+
+  } catch (error) {
+    console.error('Update holiday error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+
+// @desc    Delete holiday
+// @route   DELETE /api/admin/holidays/:id
+// @access  Private (Admin)
+exports.deleteHoliday = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const holiday = await Holiday.findById(id);
+
+    if (!holiday) {
+      return res.status(404).json({
+        success: false,
+        message: 'Holiday not found'
+      });
+    }
+
+    await holiday.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: 'Holiday deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete holiday error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
 
 module.exports = exports;
