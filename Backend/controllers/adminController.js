@@ -170,6 +170,7 @@ const approveClient = async (req, res) => {
     } else {
       // ❌ REJECT: Client inactive rakhna, par user account delete karna optional
       client.isActive = false;
+      client.rejectedAt = new Date();
       await client.save();
 
       // User bhi inactive rakho
