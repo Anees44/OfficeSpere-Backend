@@ -115,6 +115,7 @@ const clientSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    rejectedAt: { type: Date, default: null },
   },
   {
     timestamps: true,

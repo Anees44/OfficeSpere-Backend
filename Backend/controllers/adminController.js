@@ -45,6 +45,7 @@ const approveClient = async (req, res) => {
     if (approve === true || approve === 'true') {
       // ✅ APPROVE: Dono Client aur User ko active karo
       client.isActive = true;
+      client.rejectedAt = new Date();
       await client.save();
 
       await User.findByIdAndUpdate(client.userId._id, { isActive: true });
@@ -124,7 +125,7 @@ const approveClient = async (req, res) => {
                 </div>
                 <div class="footer">
                   <p>Thank you for choosing OfficeSphere!</p>
-                  <p>If you need help, contact us at support@officesphere.com</p>
+                  <p>If you need help, contact us at <a href="mailto:turabdeveloper1@gmail.com" style="color: #10b981;">turabdeveloper1@gmail.com</a></p>
                 </div>
               </div>
             </body>
@@ -867,12 +868,12 @@ const getClients = async (req, res) => {
       // - Client isActive: false AND User isActive: true = INACTIVE (rejected/deactivated)
       let clientStatus;
       if (client.isActive && userData.isActive) {
-        clientStatus = 'active';
-      } else if (!client.isActive && !userData.isActive) {
-        clientStatus = 'pending';  // ✅ Naya register hua, dono inactive
-      } else {
-        clientStatus = 'inactive';
-      }
+  clientStatus = 'active';
+} else if (!client.isActive && !userData.isActive && !client.rejectedAt) {
+  clientStatus = 'pending';  // naya register hua, abhi approve nahi
+} else {
+  clientStatus = 'inactive'; // rejected ya deactivated
+}
 
       return {
         _id: client._id,
@@ -1206,7 +1207,7 @@ const deleteClient = async (req, res) => {
     client.isActive = false;
     await client.save();
 
-    await User.findByIdAndUpdate(client.user, { isActive: false });
+     await User.findByIdAndUpdate(client.userId, { isActive: false });
 
     res.status(200).json({
       success: true,
