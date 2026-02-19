@@ -316,7 +316,10 @@ exports.updateProject = async (req, res) => {
         message: 'Project not found'
       });
     }
-
+if (oldStatus === 'Planning' && project.status !== 'Planning') {
+  const client = await Client.findById(project.client).populate('userId', 'name email');
+  if (client) await sendProjectApprovalEmail(client, project);
+}
     // Update fields
     const allowedFields = [
       'name',

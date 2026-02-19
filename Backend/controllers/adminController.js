@@ -21,6 +21,11 @@ const { getIO } = require('../config/socket');
 // approveClient function - FIXED & COMPLETE
 // ============================================
 
+// ============================================
+// SIRF IS FUNCTION KO adminController.js MEIN REPLACE KARO
+// approveClient — BUGS FIXED + PROJECT EMAIL ADDED
+// ============================================
+
 const approveClient = async (req, res) => {
   try {
     const { id } = req.params;
@@ -28,35 +33,54 @@ const approveClient = async (req, res) => {
 
     console.log('🔍 Approve client request:', { id, approve, reason });
 
-    // ✅ Client + User dono populate karo
     const client = await Client.findById(id).populate('userId', 'name email isActive');
 
     if (!client) {
-      return res.status(404).json({
-        success: false,
-        message: 'Client not found'
-      });
+      return res.status(404).json({ success: false, message: 'Client not found' });
     }
 
     console.log('👤 Client found:', client.clientId, '| User:', client.userId?.email);
 
     const { sendEmail } = require('../utils/sendEmail');
 
+    // ============ APPROVE ============
     if (approve === true || approve === 'true') {
-      // ✅ APPROVE: Dono Client aur User ko active karo
+
       client.isActive = true;
-      client.rejectedAt = new Date();
+      client.rejectedAt = null;           // ✅ BUG FIX: approve par null rakho
       await client.save();
 
       await User.findByIdAndUpdate(client.userId._id, { isActive: true });
 
       console.log('✅ Client & User activated:', client.clientId);
 
-      // ✅ Approval email - professional template
+      // Fetch client ke projects (agar koi pending project ho)
+      const clientProjects = await Project.find({
+        client: client._id,
+        isActive: true
+      }).select('name status projectId');
+
+      const pendingProjects = clientProjects.filter(p => p.status === 'Planning');
+
+      // ✅ Approval email — login info + projects info dono
       try {
+        const projectsHtml = pendingProjects.length > 0
+          ? `
+            <div class="info-box" style="margin-top: 20px;">
+              <p style="color: #1f2937; font-weight: 600; margin: 0 0 10px;">📋 Your Submitted Projects:</p>
+              ${pendingProjects.map(p => `
+                <div class="info-row">
+                  <span class="info-label">${p.projectId || 'Project'}</span>
+                  <span class="info-value">${p.name} — <span style="color:#f59e0b;">Under Review</span></span>
+                </div>
+              `).join('')}
+            </div>
+          `
+          : '';
+
         await sendEmail({
           to: client.userId.email,
-          subject: '🎉 Account Approved - Welcome to OfficeSphere!',
+          subject: '🎉 Account Approved — Welcome to OfficeSphere!',
           html: `
             <!DOCTYPE html>
             <html>
@@ -76,8 +100,15 @@ const approveClient = async (req, res) => {
                 .info-row:last-child { border-bottom: none; }
                 .info-label { color: #6b7280; font-size: 14px; }
                 .info-value { color: #111827; font-weight: 600; font-size: 14px; }
+                .credentials-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 20px; margin: 20px 0; }
+                .cred-title { color: #1e40af; font-weight: 700; font-size: 15px; margin: 0 0 12px; }
+                .cred-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #dbeafe; }
+                .cred-row:last-child { border-bottom: none; }
+                .cred-label { color: #6b7280; font-size: 14px; }
+                .cred-value { color: #1e40af; font-weight: 700; font-size: 14px; font-family: monospace; }
                 .btn { display: inline-block; background: #10b981; color: white; padding: 14px 35px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: 600; margin: 20px 0; }
                 .footer { background: #f9fafb; padding: 20px 30px; text-align: center; color: #9ca3af; font-size: 13px; border-top: 1px solid #e5e7eb; }
+                .notice { background: #fef3c7; border: 1px solid #fde68a; border-radius: 6px; padding: 12px 16px; color: #92400e; font-size: 13px; margin-top: 16px; }
               </style>
             </head>
             <body>
@@ -89,34 +120,59 @@ const approveClient = async (req, res) => {
                 <div class="body">
                   <div class="greeting">Dear ${client.userId.name},</div>
                   <div class="message">
-                    Great news! Your OfficeSphere account has been reviewed and <strong>approved</strong> by our admin team. 
-                    You can now log in and start managing your projects.
+                    Great news! Your OfficeSphere account for <strong>${client.companyName}</strong> has been 
+                    <strong style="color:#10b981;">approved</strong> by our admin team. 
+                    You can now log in using the credentials below.
                   </div>
+
+                  <!-- LOGIN CREDENTIALS BOX -->
+                  <div class="credentials-box">
+                    <p class="cred-title">🔑 Your Login Credentials</p>
+                    <div class="cred-row">
+                      <span class="cred-label">Login Email</span>
+                      <span class="cred-value">${client.userId.email}</span>
+                    </div>
+                    <div class="cred-row">
+                      <span class="cred-label">Password</span>
+                      <span class="cred-value">Use the password you set during registration</span>
+                    </div>
+                    <div class="cred-row">
+                      <span class="cred-label">Client ID</span>
+                      <span class="cred-value">${client.clientId}</span>
+                    </div>
+                  </div>
+
+                  <!-- ACCOUNT INFO BOX -->
                   <div class="info-box">
                     <div class="info-row">
                       <span class="info-label">Company</span>
                       <span class="info-value">${client.companyName}</span>
                     </div>
                     <div class="info-row">
-                      <span class="info-label">Client ID</span>
-                      <span class="info-value">${client.clientId}</span>
-                    </div>
-                    <div class="info-row">
-                      <span class="info-label">Email</span>
-                      <span class="info-value">${client.userId.email}</span>
-                    </div>
-                    <div class="info-row">
                       <span class="info-label">Status</span>
-                      <span class="info-value" style="color: #10b981;">Active ✓</span>
+                      <span class="info-value" style="color: #10b981;">✓ Active</span>
+                    </div>
+                    <div class="info-row">
+                      <span class="info-label">Account Type</span>
+                      <span class="info-value">Client Portal</span>
                     </div>
                   </div>
+
+                  <!-- PROJECTS SECTION (sirf agar pending projects hain) -->
+                  ${projectsHtml}
+
                   <div class="message">
-                    You can now:<br>
+                    Ab aap yeh kuch kar sakte hain:<br>
                     • View and track your projects<br>
                     • Submit new project requests<br>
                     • Attend meetings with our team<br>
                     • Access detailed reports
                   </div>
+
+                  <div class="notice">
+                    ⚠️ <strong>Security Tip:</strong> Please change your password after first login for your account safety.
+                  </div>
+
                   <center>
                     <a href="${process.env.FRONTEND_URL}/login" class="btn">
                       Login to Dashboard →
@@ -125,7 +181,7 @@ const approveClient = async (req, res) => {
                 </div>
                 <div class="footer">
                   <p>Thank you for choosing OfficeSphere!</p>
-                  <p>If you need help, contact us at <a href="mailto:turabdeveloper1@gmail.com" style="color: #10b981;">turabdeveloper1@gmail.com</a></p>
+                  <p>Need help? Contact us at <a href="mailto:turabdeveloper1@gmail.com" style="color: #10b981;">turabdeveloper1@gmail.com</a></p>
                 </div>
               </div>
             </body>
@@ -135,10 +191,10 @@ const approveClient = async (req, res) => {
         console.log('📧 Approval email sent to:', client.userId.email);
       } catch (emailError) {
         console.error('❌ Email send error:', emailError.message);
-        // Email fail ho bhi to response success dena hai
+        // Email fail ho to bhi response success dena hai
       }
 
-      // ✅ Socket notification
+      // Socket notification
       try {
         const io = getIO();
         io.to(`client-${client._id}`).emit('account-approved', {
@@ -146,7 +202,6 @@ const approveClient = async (req, res) => {
           clientId: client.clientId,
           companyName: client.companyName
         });
-        // Admin room ko bhi update karo
         io.to('admin').emit('client-status-changed', {
           clientId: client._id,
           status: 'active'
@@ -157,7 +212,7 @@ const approveClient = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: `Client "${client.companyName}" approved successfully. Email sent to ${client.userId.email}`,
+        message: `Client "${client.companyName}" approved. Email sent to ${client.userId.email}`,
         data: {
           _id: client._id,
           clientId: client.clientId,
@@ -167,13 +222,13 @@ const approveClient = async (req, res) => {
         }
       });
 
+    // ============ REJECT ============
     } else {
-      // ❌ REJECT: Client inactive rakhna, par user account delete karna optional
+
       client.isActive = false;
-      client.rejectedAt = new Date();
+      client.rejectedAt = new Date();   // ✅ Reject par set karo
       await client.save();
 
-      // User bhi inactive rakho
       await User.findByIdAndUpdate(client.userId._id, { isActive: false });
 
       console.log('❌ Client rejected:', client.clientId);
@@ -182,7 +237,7 @@ const approveClient = async (req, res) => {
       try {
         await sendEmail({
           to: client.userId.email,
-          subject: 'OfficeSphere - Registration Update',
+          subject: 'OfficeSphere — Registration Update',
           html: `
             <!DOCTYPE html>
             <html>
@@ -217,13 +272,13 @@ const approveClient = async (req, res) => {
                   </div>
                   ` : ''}
                   <div class="message">
-                    If you believe this is a mistake or would like to provide additional information, 
+                    If you believe this is a mistake or would like to reapply with updated information, 
                     please contact our support team.
                   </div>
                 </div>
                 <div class="footer">
                   <p>OfficeSphere Team</p>
-                  <p>support@officesphere.com</p>
+                  <p><a href="mailto:turabdeveloper1@gmail.com" style="color:#6b7280;">turabdeveloper1@gmail.com</a></p>
                 </div>
               </div>
             </body>
