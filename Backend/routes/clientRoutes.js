@@ -12,7 +12,13 @@ const {
   uploadProjectFiles,
   submitFeedback,
   getProjectProgress,
-  sendToAdmin
+  sendToAdmin,
+  getDashboard,        // ✅ add karo
+  getNotifications,    // ✅ add karo
+  markNotificationRead,   // ✅ add karo
+  markNotificationUnread, // ✅ add karo
+  markAllNotificationsRead, // ✅ add karo
+  deleteNotification,  // ✅ add karo
 } = require('../controllers/clientController');
 const { protect, authorize } = require('../middleware/auth');
 const { uploadMultiple } = require('../config/multer');
@@ -24,6 +30,14 @@ router.use(authorize('client'));
 // ============================================
 // PROJECT Routes
 // ============================================
+
+router.get('/dashboard', getDashboard);
+
+router.get('/notifications', getNotifications); // ✅
+router.patch('/notifications/mark-all-read', markAllNotificationsRead); // ✅
+router.patch('/notifications/:id/read', markNotificationRead); // ✅
+router.patch('/notifications/:id/unread', markNotificationUnread); // ✅
+router.delete('/notifications/:id', deleteNotification); // ✅
 
 // GET all client projects, POST create project with files
 router.route('/projects')
