@@ -19,6 +19,11 @@ const {
   markNotificationUnread, // ✅ add karo
   markAllNotificationsRead, // ✅ add karo
   deleteNotification,  // ✅ add karo
+   getProfile,        // ✅ YEH ADD KARO
+  updateProfile,     // ✅ YEH ADD KARO
+  changePassword,    // ✅ YEH ADD KARO
+  getMyMeetings,     // ✅ YEH ADD KARO
+  getMeeting,        // ✅ YEH ADD KARO
 } = require('../controllers/clientController');
 const { protect, authorize } = require('../middleware/auth');
 const { uploadMultiple } = require('../config/multer');
@@ -66,5 +71,14 @@ router.get('/projects/:id/progress', getProjectProgress);
 
 // Send project/request to admin
 router.post('/projects/:id/send-to-admin', sendToAdmin);
+// PROFILE Routes
+router.route('/profile')
+  .get(getProfile)       // ✅ GET /api/client/profile
+  .put(updateProfile);   // ✅ PUT /api/client/profile
 
+router.put('/password', changePassword); // ✅ PUT /api/client/password
+
+// MEETINGS Routes
+router.get('/meetings', getMyMeetings);         // ✅
+router.get('/meetings/:id', getMeeting);        // ✅
 module.exports = router;
